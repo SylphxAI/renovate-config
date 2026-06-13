@@ -1,205 +1,122 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Sylphx org-wide Renovate preset (Doctrine ADR-6). Updates land through merge queues: PR goes green, auto-merge enqueues, the queue validates and merges. Non-major updates are fully unattended; majors wait for an agent.",
   "extends": [
-    "config:base",
+    "config:recommended",
     ":dependencyDashboard",
-    "schedule:weekends",
     ":semanticCommits",
     ":enableVulnerabilityAlerts",
-    ":automergePatch",
-    ":automergeMinor",
-    ":separatePatchReleases"
+    "group:monorepos",
+    "group:recommended"
   ],
-  "timezone": "Europe/London",
+  "timezone": "Asia/Hong_Kong",
+  "schedule": ["after 10pm", "before 6am"],
   "dependencyDashboardTitle": "Dependency Dashboard",
   "labels": ["dependencies"],
-  "rangeStrategy": "widen",
-  "rebaseWhen": "behind-base-branch",
-  "prConcurrentLimit": 5,
-  "prHourlyLimit": 2,
-  "stabilityDays": 3,
-
+  "rebaseWhen": "conflicted",
+  "platformAutomerge": true,
+  "prConcurrentLimit": 8,
+  "prHourlyLimit": 4,
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null,
+    "labels": ["security"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 6am on monday"]
+  },
   "packageRules": [
     {
-      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "description": "Non-major updates merge unattended through the queue",
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
       "automerge": true
     },
     {
+      "description": "Majors need an agent decision; keep them visible and rare",
       "matchUpdateTypes": ["major"],
       "labels": ["dependencies", "breaking"],
-      "stabilityDays": 7
+      "minimumReleaseAge": "7 days"
     },
     {
-      "matchDepTypes": ["devDependencies"],
-      "rangeStrategy": "pin",
-      "automerge": true,
-      "labels": ["dev"]
-    },
-    {
-      "matchPackagePatterns": ["^@types/"],
+      "description": "Type definitions are safe to batch and merge",
+      "matchPackageNames": ["@types/{/,}**"],
       "groupName": "TypeScript type definitions",
       "automerge": true
     },
-
-    // Docker
+    {
+      "description": "Pin GitHub Action digests for supply-chain integrity",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
     {
       "matchDatasources": ["docker"],
       "labels": ["docker-update"]
     },
-
-    // Android
     {
-      "matchCategories": ["android"],
       "matchManagers": ["gradle", "gradle-wrapper"],
       "groupName": "android dependencies",
       "labels": ["android"]
     },
     {
-      "matchPackagePatterns": ["^com.android", "^androidx", "^com.google.android"],
+      "matchPackageNames": ["com.android.**", "androidx.**", "com.google.android.**"],
       "groupName": "android core dependencies",
-      "stabilityDays": 7
+      "minimumReleaseAge": "7 days"
     },
-
-    // iOS
     {
       "matchDatasources": ["swift", "pod"],
       "groupName": "iOS dependencies",
       "labels": ["ios"],
-      "stabilityDays": 5
+      "minimumReleaseAge": "5 days"
     },
-
-    // Flutter / Dart
     {
       "matchDatasources": ["dart", "pub"],
       "groupName": "Flutter dependencies",
       "labels": ["flutter", "dart"]
     },
-
-    // React
     {
-      "matchPackagePatterns": ["^react", "^@react"],
+      "description": "Effect ecosystem moves in lockstep",
+      "matchPackageNames": ["effect", "@effect/**"],
+      "groupName": "Effect packages",
+      "labels": ["effect"]
+    },
+    {
+      "matchPackageNames": ["react", "react-*", "@react/**", "@types/react*"],
       "groupName": "React packages",
       "labels": ["react"]
     },
-
-    // React Native
     {
-      "matchPackagePatterns": ["^react-native", "^@react-native"],
-      "groupName": "React Native packages",
-      "labels": ["react-native"]
-    },
-
-    // Vue
-    {
-      "matchPackagePatterns": ["^vue", "^@vue", "^nuxt", "^@nuxt"],
-      "groupName": "Vue packages",
-      "labels": ["vue"]
-    },
-
-    // Linting / Testing
-    {
-      "matchPackagePatterns": ["eslint", "prettier"],
+      "matchPackageNames": ["/biome/", "/eslint/", "/prettier/"],
       "groupName": "Linting packages",
       "labels": ["linting"]
     },
     {
-      "matchPackagePatterns": ["jest", "testing"],
-      "groupName": "Testing packages",
-      "labels": ["testing"]
-    },
-
-    // Bun
-    {
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["bun", "bun-types"],
-      "groupName": "Bun packages",
+      "matchPackageNames": ["bun", "@types/bun", "bun-types"],
+      "groupName": "Bun runtime",
       "labels": ["bun"]
     },
-
-    // PHP / Laravel
     {
       "matchDatasources": ["packagist"],
       "labels": ["php"]
     },
     {
-      "matchPackagePatterns": ["^laravel", "^illuminate"],
-      "groupName": "Laravel packages",
-      "labels": ["laravel"]
-    },
-    {
-      "matchPackagePatterns": ["^symfony"],
-      "groupName": "Symfony packages",
-      "labels": ["symfony"]
-    },
-
-    // DevContainer
-    {
-      "matchManagers": ["devcontainer"],
-      "labels": ["devcontainer"]
-    },
-
-    // Python
-    {
-      "matchManagers": ["pip_requirements", "pip_setup", "pipenv", "poetry", "pep621", "setup-cfg"],
+      "matchManagers": [
+        "pip_requirements",
+        "pip_setup",
+        "pipenv",
+        "poetry",
+        "pep621"
+      ],
       "groupName": "Python dependencies",
       "labels": ["python"]
-    },
-    {
-      "matchPackagePatterns": ["^django"],
-      "groupName": "Django packages",
-      "labels": ["django"]
-    },
-    {
-      "matchPackagePatterns": ["^flask"],
-      "groupName": "Flask packages",
-      "labels": ["flask"]
-    },
-    {
-      "matchPackagePatterns": ["^pytest"],
-      "groupName": "Python testing packages",
-      "labels": ["python-testing"]
     }
   ],
-
-  // Manager settings
   "docker": {
-    "enabled": true,
     "pinDigests": true
   },
-  "gradle": {
-    "fileMatch": ["^build\\.gradle$", "^build\\.gradle\\.kts$", "^settings\\.gradle\\.kts$", "^settings\\.gradle$"]
-  },
-  "swift": { "enabled": true },
-  "cocoapods": { "enabled": true },
-  "dart": { "enabled": true },
-  "flutter": { "enabled": true },
-  "composer": {
-    "enabled": true,
-    "fileMatch": ["(^|/)composer\\.json$"]
-  },
-  "npm": {
-    "fileMatch": ["(^|/)package\\.json$", "(^|/)pnpm-lock\\.yaml$", "(^|/)bun\\.lockb$"]
-  },
-  "devcontainer": { "enabled": true },
-
-  // Python managers
-  "pip_requirements": {
-    "enabled": true,
-    "fileMatch": ["(^|/)requirements\\.txt$", "(^|/)requirements/.*\\.txt$", "(^|/)requirements-.*\\.txt$"]
-  },
-  "pip_setup": { "enabled": true },
-  "pipenv": { "enabled": true },
-  "poetry": { "enabled": true },
-  "pep621": { "enabled": true },
-  "setup-cfg": { "enabled": true },
-
-  // Lockfile maintenance
-  "lockFileMaintenance": {
-    "enabled": true,
-    "schedule": ["before 5am on monday"]
-  },
-
-  // Ignore paths
   "ignorePaths": [
     "**/ios/Pods/**",
     "**/android/.gradle/**",

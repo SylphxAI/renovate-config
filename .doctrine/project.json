@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "repo": "SylphxAI/renovate-config",
+    "name": "Renovate Config",
+    "lifecycle": "production",
+    "layer": "tooling",
+    "summary": "Renovate Config is the shared dependency-update policy consumed by repositories that extend github>SylphxAI/renovate-config.",
+    "goals": [
+      "Provide one default Renovate policy for multi-stack repositories.",
+      "Reduce duplicated dependency-update configuration across the organization.",
+      "Keep dependency-update behavior predictable, low-noise, and safe for CI capacity."
+    ],
+    "nonGoals": [
+      "Own project-specific dependency exceptions, release policies, private registry credentials, or package-manager lockfiles.",
+      "Become a general CI/admission policy repository.",
+      "Make broad automerge or schedule changes without fleet impact analysis."
+    ]
+  },
+  "boundaries": {
+    "owns": [
+      {
+        "name": "shared-renovate-policy",
+        "description": "The default Renovate configuration, stack detection assumptions, grouping, scheduling, automerge defaults, labels, and rate limits."
+      },
+      {
+        "name": "renovate-config-documentation",
+        "description": "README usage instructions and supported stack documentation for consuming repositories."
+      }
+    ],
+    "doesNotOwn": [
+      "Consuming repositories' local Renovate overrides, private registry credentials, package-manager lockfiles, or dependency risk decisions.",
+      "Organization-wide CI admission policy.",
+      "Application release policies or package publishing workflows."
+    ],
+    "publicSurfaces": [
+      {
+        "type": "configuration",
+        "name": "Shared Renovate default config",
+        "location": "default.json"
+      },
+      {
+        "type": "documentation",
+        "name": "Public usage and stack support documentation",
+        "location": "README.md"
+      }
+    ],
+    "allowedDependencies": [
+      {
+        "repo": "SylphxAI/doctrine",
+        "surface": "enterprise engineering doctrine",
+        "direction": "downward"
+      }
+    ],
+    "forbiddenCouplings": [
+      "Do not encode project-specific dependency policy in the shared default config.",
+      "Do not store secrets, private registry credentials, or repo-specific tokens.",
+      "Do not broaden automerge or scheduling behavior without fleet impact analysis."
+    ]
+  },
+  "documentation": {
+    "adr": {
+      "path": "docs/adr/",
+      "status": "planned"
+    },
+    "specs": {
+      "path": "README.md, default.json",
+      "status": "present"
+    },
+    "catalog": {
+      "path": "PROJECT.md",
+      "status": "present"
+    },
+    "runbooks": {
+      "path": "AGENTS.md",
+      "status": "present"
+    },
+    "generatedReferences": {
+      "path": "not-applicable",
+      "status": "not-applicable"
+    }
+  },
+  "delivery": {
+    "ciModel": "none",
+    "requiredContexts": [],
+    "deployPath": "Main branch changes are consumed by Renovate through github>SylphxAI/renovate-config; no repo-local GitHub Actions workflow is declared at adoption time.",
+    "productionProof": "JSON parse validation for default.json, README/config diff review, central project manifest audit, and representative consuming-repo impact analysis for policy changes.",
+    "recoveryClass": "source-revertable"
+  },
+  "adoption": {
+    "status": "baseline",
+    "gaps": [
+      {
+        "id": "config-validation-workflow",
+        "description": "No repo-local workflow validates default.json or consuming-repo examples at adoption time.",
+        "owner": "SylphxAI/renovate-config",
+        "target": "before full doctrine adoption"
+      }
+    ]
+  }
+}

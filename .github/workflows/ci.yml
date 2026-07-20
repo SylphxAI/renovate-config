@@ -1,0 +1,30 @@
+name: CI
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Renovate JSON
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+import json, pathlib, sys
+for name in ['default.json','renovate.json','config.js']:
+  p=pathlib.Path(name)
+  if p.exists() and p.suffix=='.json':
+    json.loads(p.read_text())
+    print('ok', p)
+  elif p.exists():
+    print('present non-json', p)
+if not any(pathlib.Path(n).exists() for n in ['default.json','renovate.json']):
+  print('WARN no default.json/renovate.json', file=sys.stderr)
+  sys.exit(1)
+PY

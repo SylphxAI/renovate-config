@@ -13,18 +13,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate Renovate JSON
-        run: |
-          set -euo pipefail
-          python3 -c '
-import json, pathlib, sys
-ok = False
-for name in ("default.json", "renovate.json"):
-    p = pathlib.Path(name)
-    if p.exists():
-        json.loads(p.read_text())
-        print("ok", p)
-        ok = True
-if not ok:
-    print("missing default.json/renovate.json", file=sys.stderr)
-    sys.exit(1)
-'
+        run: python3 scripts/validate_renovate.py

@@ -9,8 +9,10 @@ permissions:
   contents: read
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: sylphx-linux-standard
     steps:
       - uses: actions/checkout@v4
+      - name: Verify static owned runner profiles
+        run: bash scripts/check-owned-runner-profiles.sh
       - name: Validate Renovate JSON
         run: python3 scripts/validate_renovate.py

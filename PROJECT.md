@@ -9,8 +9,6 @@ rate limits, and documentation for consumers.
 
 - Lifecycle: `production`
 - Layer: `tooling`
-- Doctrine source of truth: [SylphxAI/doctrine](https://github.com/SylphxAI/doctrine)
-- Machine manifest: `.doctrine/project.json`
 
 ## Goals
 

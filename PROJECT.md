@@ -34,6 +34,7 @@ and project-specific dependency risk decisions.
 
 ## Delivery
 
-There is no repo-local GitHub Actions workflow at adoption time. Changes are
-config/docs-only and become production behavior when merged to `main` because
-consuming Renovate runs resolve the shared config from GitHub.
+Preset changes become production behavior when merged to `main` because
+consuming Renovate runs resolve the shared config from GitHub. This repository
+also runs Renovate for the org: `.github/workflows/renovate.yml` with the scope
+and defaults in `runner/config.json` (see `runner/README.md`).

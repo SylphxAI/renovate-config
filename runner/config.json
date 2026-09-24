@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
+  "description": "Self-hosted Renovate runner for the SylphxAI org (see runner/README.md). Global options plus repository defaults: a repository with its own Renovate config overrides these defaults.",
+  "platform": "github",
+  "autodiscover": true,
+  "autodiscoverFilter": [
+    "SylphxAI/{infra,cloud,hands,agents,kalkas,models}",
+    "SylphxAI/{bgca,consultant-mcp,cue,decision,firestore_odm,iris,keel,keel-website,korvana,locus,lookout,luzzy,mark,media-curator,photo-dedup,puzzled,skills,spine,tryit,viszy.ai}"
+  ],
+  "onboarding": false,
+  "requireConfig": "optional",
+  "extends": [
+    "github>SylphxAI/renovate-config"
+  ],
+  "github-actions": {
+    "description": "The runner's App has no `workflows` permission yet, so GitHub rejects any push that edits .github/workflows. Remove this block when the dedicated App with `workflows: write` replaces it.",
+    "enabled": false
+  }
+}

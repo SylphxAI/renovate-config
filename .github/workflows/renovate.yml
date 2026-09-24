@@ -1,0 +1,68 @@
+name: Renovate
+
+# Self-hosted Renovate for the SylphxAI org. Scope, defaults and the reason for
+# each lives in runner/config.json; the credential contract is in runner/README.md.
+on:
+  schedule:
+    # The org preset only opens PRs 22:00-06:00 Asia/Hong_Kong (14:00-22:00
+    # UTC); run hourly inside that window, plus one daytime pass for the
+    # dashboard and "at any time" vulnerability PRs.
+    - cron: "17 14-22 * * *"
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      log-level:
+        description: Renovate LOG_LEVEL
+        type: choice
+        options: [info, debug]
+        default: info
+      dry-run:
+        description: Renovate dryRun (empty = real run)
+        type: choice
+        options: ["", lookup, full]
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    runs-on: sylphx-linux-standard
+    environment: renovate
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint org installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: SylphxAI
+
+      - name: Resolve bot git identity
+        id: bot
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          id=$(gh api "users/${SLUG}%5Bbot%5D" --jq .id)
+          echo "author=${SLUG}[bot] <${id}+${SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
+
+      - name: Renovate
+        uses: renovatebot/github-action@9fea9f0fbf80401026d11d03911d62b1f70fef1f # v46.3.3
+        with:
+          token: ${{ steps.app.outputs.token }}
+          configurationFile: runner/config.json
+        env:
+          LOG_LEVEL: ${{ inputs.log-level || 'info' }}
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
+          RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
+          RENOVATE_USERNAME: ${{ steps.app.outputs.app-slug }}[bot]

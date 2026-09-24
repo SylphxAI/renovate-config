@@ -1,7 +1,7 @@
 name: Renovate
 
-# Self-hosted Renovate for the SylphxAI org. Scope, defaults and the reason for
-# each lives in runner/config.json; the credential contract is in runner/README.md.
+# Self-hosted Renovate for the SylphxAI org. Scope (`repositories`), defaults
+# and the reason for each live in runner/config.json; the credential contract is in runner/README.md.
 on:
   schedule:
     # The org preset only opens PRs 22:00-06:00 Asia/Hong_Kong (14:00-22:00
@@ -17,10 +17,10 @@ on:
         options: [info, debug]
         default: info
       dry-run:
-        description: Renovate dryRun (empty = real run)
+        description: Renovate dryRun
         type: choice
-        options: ["", lookup, full]
-        default: ""
+        options: ["off", lookup, full]
+        default: "off"
 
 permissions:
   contents: read
@@ -30,10 +30,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: sylphx-linux-standard
+    outputs:
+      repositories: ${{ steps.scope.outputs.repositories }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: scope
+        run: echo "repositories=$(jq -c .repositories runner/config.json)" >> "$GITHUB_OUTPUT"
+
+  # One job per repository: a serial pass over the whole scope outlives any
+  # sane timeout, and one slow repository must not starve the rest.
   renovate:
+    needs: plan
     runs-on: sylphx-linux-standard
     environment: renovate
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
+    name: renovate (${{ matrix.repository }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,6 +83,7 @@ jobs:
           configurationFile: runner/config.json
         env:
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
-          RENOVATE_DRY_RUN: ${{ inputs.dry-run }}
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run != 'off' && inputs.dry-run || '' }}
+          RENOVATE_REPOSITORIES: ${{ matrix.repository }}
           RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
           RENOVATE_USERNAME: ${{ steps.app.outputs.app-slug }}[bot]

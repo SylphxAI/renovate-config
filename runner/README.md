@@ -6,12 +6,12 @@ human sign-in to recover, so Renovate runs here instead:
 schedule (hourly 14:00-22:00 UTC, the preset's 22:00-06:00 Hong Kong window,
 plus 04:00 UTC) and on `workflow_dispatch`.
 
-- **Scope**: `autodiscoverFilter` in [`config.json`](config.json) - the
-  foundation repositories and the SylphxAI product repositories in the company
-  portfolio. Archived repositories are skipped by autodiscover. `citra` and
-  `kernox` are left out on purpose: Dependabot owns every ecosystem there, and
-  one updater per ecosystem avoids duplicate PRs. Add a repository by adding it
-  to the filter.
+- **Scope**: `repositories` in [`config.json`](config.json) - the foundation
+  repositories and the SylphxAI product repositories in the company portfolio;
+  the workflow runs one Renovate job per entry, eight at a time. Renovate skips
+  an archived repository. `citra` and `kernox` are left out on purpose:
+  Dependabot owns every ecosystem there, and one updater per ecosystem avoids
+  duplicate PRs. Add a repository by adding it to the list.
 - **One updater per ecosystem**: the enforced org code security configuration
   turns on Dependabot security updates, so Dependabot opens vulnerability PRs
   and Renovate (`vulnerabilityAlerts.enabled: false` in the preset) opens

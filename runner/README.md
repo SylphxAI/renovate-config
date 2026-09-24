@@ -12,6 +12,10 @@ plus 04:00 UTC) and on `workflow_dispatch`.
   `kernox` are left out on purpose: Dependabot owns every ecosystem there, and
   one updater per ecosystem avoids duplicate PRs. Add a repository by adding it
   to the filter.
+- **One updater per ecosystem**: the enforced org code security configuration
+  turns on Dependabot security updates, so Dependabot opens vulnerability PRs
+  and Renovate (`vulnerabilityAlerts.enabled: false` in the preset) opens
+  version updates only.
 - **Defaults**: every repository in scope gets `github>SylphxAI/renovate-config`
   without an onboarding PR; a repository's own Renovate config overrides it.
 - **Auth**: a GitHub App installation token minted per run with
@@ -27,8 +31,7 @@ Today the runner uses the org-owned **Sylphx Builder** App (id 2847814,
 installed on all repositories): contents, pull requests, issues, checks and
 statuses write. It has no `workflows` permission, so GitHub Actions updates are
 disabled in `config.json` (GitHub rejects any App push that edits
-`.github/workflows`), and no `vulnerability_alerts` read, so Renovate relies on
-OSV alerts.
+`.github/workflows`).
 
 The target is a dedicated **Sylphx Renovate** App. Creating an App needs the
 GitHub web UI, so an org owner does it once:

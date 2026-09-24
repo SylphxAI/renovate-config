@@ -5,7 +5,6 @@
     "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits",
-    ":enableVulnerabilityAlerts",
     "group:monorepos",
     "group:recommended"
   ],
@@ -18,11 +17,9 @@
   "prConcurrentLimit": 8,
   "prHourlyLimit": 4,
   "minimumReleaseAge": "3 days",
-  "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
-    "schedule": ["at any time"],
-    "minimumReleaseAge": null,
-    "labels": ["security"]
+    "description": "Dependabot security updates own vulnerability PRs (org code security configuration); Renovate owns version updates, so the two never open the same fix.",
+    "enabled": false
   },
   "lockFileMaintenance": {
     "enabled": true,

@@ -1,49 +1,12 @@
-<div align="center">
+# renovate-config
 
-# Renovate Config 🔄
+A shared [Renovate](https://docs.renovatebot.com) preset: non-major dependency
+updates merge on their own once CI passes, majors wait for a review, and
+related packages arrive as one pull request instead of many.
 
-**Unified Renovate configuration for multi-stack projects**
+## Use it
 
-[![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](https://github.com/SylphxAI/renovate-config/blob/main/LICENSE)
-[![Renovate](https://img.shields.io/badge/Renovate-enabled-blue?style=flat-square&logo=renovatebot)](https://renovatebot.com)
-
-**14 tech stacks** • **Auto-detection** • **Smart grouping** • **Weekend updates**
-
-[Quick Start](#-quick-start) • [Features](#-key-features) • [Stack Support](#-supported-stacks)
-
-</div>
-
----
-
-## 🚀 Overview
-
-A unified Renovate configuration that automatically handles dependency updates across multiple technology stacks with smart defaults and minimal configuration.
-
-**The Problem:**
-```
-Managing Renovate across projects:
-- Duplicate config in every repo ❌
-- Inconsistent update strategies ❌
-- Manual stack-specific rules ❌
-- Update noise during weekdays ❌
-```
-
-**The Solution:**
-```
-Shared Renovate Config:
-- Single source of truth ✅
-- Auto stack detection ✅
-- Smart defaults for 14 stacks ✅
-- Weekend-only updates ✅
-```
-
-**Result: Consistent, automated dependency management across all your projects.**
-
----
-
-## 🚀 Quick Start
-
-Create `.github/renovate.json` (or `renovate.json`) in your project:
+Add `renovate.json` (or `.github/renovate.json`) to your repository:
 
 ```json
 {
@@ -51,342 +14,67 @@ Create `.github/renovate.json` (or `renovate.json`) in your project:
 }
 ```
 
-That's it! Renovate will automatically:
-- ✅ Detect your project type
-- ✅ Apply appropriate update rules
-- ✅ Schedule updates for weekends
-- ✅ Auto-merge minor/patch updates
+Renovate reads [`default.json`](default.json) from this repository, so a change
+here reaches every repository that extends it on its next run.
 
----
+## What it does
 
-## ✨ Key Features
+| Setting | Value |
+| --- | --- |
+| Based on | `config:recommended`, dependency dashboard, semantic commit messages, monorepo and recommended grouping |
+| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`) |
+| Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS |
+| Automerge | minor, patch, digest and pin updates, `@types/*`, and weekly lock file maintenance (Monday before 6am) |
+| Majors | labelled `breaking`, never automerged |
+| Limits | 4 new pull requests per hour, 8 open at once |
+| Automerge method | the platform's own auto-merge, so a merge queue or required checks still apply |
+| Security fixes | off in Renovate (`vulnerabilityAlerts`), because Dependabot security updates open them; one tool per fix avoids duplicate pull requests |
+| GitHub Actions | pinned to commit digests |
+| Docker images | pinned to digests, labelled `docker-update` |
+| Ignored paths | `node_modules`, `vendor`, `dist`, `build`, `.cache`, `ios/Pods`, `android/.gradle` |
 
-### Automation & Intelligence
+Grouped into one pull request each, with a label:
 
-| Feature | Description | Benefit |
-|---------|-------------|---------|
-| **Auto-detection** | Identifies project stack automatically | Zero manual config |
-| **Smart grouping** | Groups related dependencies | Fewer PRs, easier reviews |
-| **Auto-merge** | Minor/patch updates merge automatically | Save review time |
-| **Weekend schedule** | Updates run on weekends only | No weekday disruptions |
-| **Dependency dashboard** | Centralized update overview | Easy monitoring |
-| **Rate limiting** | Max 2 PRs/hour, 5 concurrent | Avoid overwhelming CI |
+| Group | Matches |
+| --- | --- |
+| TypeScript type definitions | `@types/*` |
+| React packages | `react`, `react-*`, `@react/*`, `@types/react*` |
+| Effect packages | `effect`, `@effect/*` |
+| Linting packages | names containing `biome`, `eslint` or `prettier` |
+| Bun runtime | `bun`, `@types/bun`, `bun-types` |
+| Android dependencies | Gradle and the Gradle wrapper |
+| iOS dependencies | Swift packages and CocoaPods |
+| Flutter dependencies | pub (Dart) packages |
+| Python dependencies | pip requirements, `setup.py`, Pipenv, Poetry, PEP 621 |
 
-### Update Strategy
+Composer (PHP) updates get the `php` label but are not grouped. Everything else
+uses Renovate's defaults for its package manager.
 
-- **Minor/Patch**: Auto-merge (safe updates)
-- **Major**: Labeled as "breaking", requires review
-- **Security**: Immediate, high priority
-- **Labels**: Auto-tagged by update type
+## Override it
 
----
-
-## 🛠️ Supported Stacks
-
-### Backend & Containerization
-
-| Technology | Package Manager | Features |
-|------------|-----------------|----------|
-| **Docker** | Docker Hub, etc. | Digest pinning, auto-merge minor |
-| **PHP** | Composer | Laravel/Symfony grouping |
-| **Python** | pip, pipenv, poetry | Django/Flask/testing groups |
-
-### Mobile Development
-
-| Technology | Package Manager | Features |
-|------------|-----------------|----------|
-| **Android** | Gradle | androidx/Google grouping |
-| **iOS** | CocoaPods, Swift | Proper iOS dependency groups |
-| **Flutter/Dart** | pub | Ignores platform-specific dirs |
-
-### Frontend & JavaScript
-
-| Technology | Package Manager | Features |
-|------------|-----------------|----------|
-| **React** | npm, pnpm, yarn, bun | React ecosystem grouping |
-| **React Native** | npm, pnpm, yarn, bun | RN-specific dependencies |
-| **Vue** | npm, pnpm, yarn, bun | Vue framework grouping |
-| **TypeScript** | npm, pnpm, yarn, bun | Type definitions handling |
-| **PNPM** | pnpm | Workspace support |
-| **Bun** | bun | Native Bun packages |
-
-**Total**: **14 technology stacks** supported out of the box.
-
----
-
-## ⚙️ Configuration Details
-
-### General Settings
-
-| Setting | Value | Purpose |
-|---------|-------|---------|
-| **Timezone** | Europe/London | Consistent scheduling |
-| **Schedule** | Weekends only | Minimize weekday noise |
-| **Rate limit** | 2 PRs/hour | Avoid CI overload |
-| **Concurrent PRs** | Max 5 | Balance updates vs review load |
-| **Auto-merge** | Minor + patch | Safe automatic updates |
-| **Labels** | Type-specific | Easy filtering |
-
-### Update Behavior
-
-**Minor & Patch Updates**:
-```
-v1.2.3 → v1.2.4 (patch)   ✅ Auto-merge
-v1.2.3 → v1.3.0 (minor)   ✅ Auto-merge
-```
-
-**Major Updates**:
-```
-v1.2.3 → v2.0.0 (major)   ⚠️ Labeled "breaking", requires review
-```
-
-**Security Updates**:
-```
-Any version with CVE       🚨 Immediate, high priority
-```
-
----
-
-## 🎯 Technology-Specific Details
-
-### Docker
-```json
-{
-  "docker": {
-    "digest": true,           // Security via digest pinning
-    "minor": { "automerge": true }
-  }
-}
-```
-
-### Android/Gradle
-```json
-{
-  "gradle": {
-    "fileMatch": ["build.gradle", "build.gradle.kts"],
-    "grouping": ["androidx", "com.google.android"]
-  }
-}
-```
-
-### Flutter/Dart
-```json
-{
-  "flutter": {
-    "enabled": true,
-    "ignorePaths": ["ios/**", "android/**"]  // Focus on Dart deps
-  }
-}
-```
-
-### JavaScript/TypeScript
-```json
-{
-  "npm": {
-    "packageRules": [
-      {
-        "groupName": "React dependencies",
-        "matchPackagePatterns": ["^react"]
-      },
-      {
-        "groupName": "TypeScript definitions",
-        "matchPackagePatterns": ["^@types/"]
-      }
-    ]
-  }
-}
-```
-
----
-
-## 💡 Customization
-
-### Override Specific Settings
-
-Add to your project's `renovate.json`:
+Settings in your own config win over the preset:
 
 ```json
 {
   "extends": ["github>SylphxAI/renovate-config"],
   "schedule": ["every weekend"],
-  "labels": ["dependencies", "custom-label"],
-  "prHourlyLimit": 5,
-  "automerge": false  // Disable auto-merge for this project
-}
-```
-
-### Add Project-Specific Rules
-
-```json
-{
-  "extends": ["github>SylphxAI/renovate-config"],
   "packageRules": [
-    {
-      "matchPackageNames": ["critical-package"],
-      "automerge": false,
-      "labels": ["critical-review"]
-    }
+    { "matchPackageNames": ["critical-package"], "automerge": false }
   ]
 }
 ```
 
-### Customize Schedule
+## Running Renovate yourself
 
-```json
-{
-  "extends": ["github>SylphxAI/renovate-config"],
-  "schedule": [
-    "after 10pm on sunday",
-    "before 6am on monday"
-  ]
-}
-```
+The SylphxAI organization runs Renovate from a GitHub Actions workflow in this
+repository instead of the hosted app. How it works, which repositories it
+covers and how it authenticates are in [runner/README.md](runner/README.md).
 
----
+## Contributing
 
-## 🔧 Advanced Usage
+Change [`default.json`](default.json) and update the tables above in the same
+pull request. CI checks that the preset is valid JSON.
 
-### Monorepo Support
+## License
 
-Renovate automatically detects monorepos (PNPM workspaces, Lerna, Nx):
-
-```json
-{
-  "extends": ["github>SylphxAI/renovate-config"],
-  "packageRules": [
-    {
-      "matchPaths": ["packages/**"],
-      "groupName": "monorepo packages"
-    }
-  ]
-}
-```
-
-### Multiple Stack Projects
-
-For projects using multiple stacks (e.g., React + Python):
-
-```json
-{
-  "extends": ["github>SylphxAI/renovate-config"]
-  // Auto-detection handles all stacks automatically
-}
-```
-
----
-
-## 📊 Comparison with Default Renovate
-
-| Feature | Default Renovate | This Config |
-|---------|------------------|-------------|
-| **Schedule** | Any time | ✅ Weekends only |
-| **Auto-merge** | Manual config | ✅ Minor/patch by default |
-| **Stack-specific** | Manual rules | ✅ 14 stacks auto-detected |
-| **Grouping** | Basic | ✅ Smart framework groups |
-| **Rate limiting** | None | ✅ 2 PRs/hour, 5 concurrent |
-| **Labels** | Basic | ✅ Type-specific labels |
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Tool** | Renovate Bot |
-| **Config Format** | JSON5 |
-| **Distribution** | GitHub repository |
-| **Stacks Supported** | 14 (Docker, Android, iOS, Dart, React, Vue, etc.) |
-
----
-
-## 🗺️ Roadmap
-
-**✅ Completed**
-- [x] Multi-stack support (14 stacks)
-- [x] Auto-detection
-- [x] Smart grouping
-- [x] Weekend scheduling
-- [x] Auto-merge minor/patch
-
-**🚀 Planned**
-- [ ] Go/Rust support
-- [ ] .NET/C# support
-- [ ] GitHub Actions workflow updates
-- [ ] Custom preset variants (strict, relaxed)
-- [ ] Vulnerability scanning integration
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! To add support for a new technology:
-
-1. **Fork the repository**
-2. **Add stack-specific rules** - Update `renovate.json`
-3. **Test with sample project** - Verify auto-detection
-4. **Document in README** - Add to supported stacks table
-5. **Submit a pull request**
-
-### Example: Adding New Stack
-
-```json
-{
-  "packageRules": [
-    {
-      "description": "Go modules",
-      "matchDatasources": ["go"],
-      "groupName": "Go dependencies"
-    }
-  ]
-}
-```
-
----
-
-## 🤝 Support
-
-[![GitHub Issues](https://img.shields.io/github/issues/SylphxAI/renovate-config?style=flat-square)](https://github.com/SylphxAI/renovate-config/issues)
-
-- 🐛 [Bug Reports](https://github.com/SylphxAI/renovate-config/issues)
-- 💬 [Discussions](https://github.com/SylphxAI/renovate-config/discussions)
-- 📧 [Email](mailto:hi@sylphx.com)
-- 📖 [Renovate Docs](https://docs.renovatebot.com)
-
-**Show Your Support:**
-⭐ Star • 👀 Watch • 🐛 Report bugs • 💡 Suggest features • 🔀 Contribute
-
----
-
-## 📄 License
-
-MIT © [Sylphx](https://sylphx.com)
-
----
-
-## 🙏 Credits
-
-Built with:
-- [Renovate](https://renovatebot.com) - Automated dependency updates
-- Community contributions ❤️
-
-Special thanks to the Renovate team for an amazing tool!
-
----
-
-## 🔗 Related
-
-- [Renovate Documentation](https://docs.renovatebot.com)
-- [Renovate Configuration Options](https://docs.renovatebot.com/configuration-options/)
-- [Renovate Presets](https://docs.renovatebot.com/presets/)
-
----
-
-<p align="center">
-  <strong>14 stacks. One config. Zero hassle.</strong>
-  <br>
-  <sub>Unified Renovate configuration that just works</sub>
-  <br><br>
-  <a href="https://sylphx.com">sylphx.com</a> •
-  <a href="https://x.com/SylphxAI">@SylphxAI</a> •
-  <a href="mailto:hi@sylphx.com">hi@sylphx.com</a>
-</p>
+MIT

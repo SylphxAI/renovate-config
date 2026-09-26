@@ -1,5 +1,9 @@
 # renovate-config
 
+<p align="center">
+  <img src="https://mark.sylphx.com/api/v1/mark/hero.svg?type=aurora&theme=grape&text=renovate-config&desc=A%20shared%20Renovate%20preset" alt="renovate-config" width="100%" />
+</p>
+
 A shared [Renovate](https://docs.renovatebot.com) preset: non-major dependency
 updates merge on their own once CI passes, majors wait for a review, and
 related packages arrive as one pull request instead of many.

@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   plan:
-    runs-on: ubuntu-latest
+    runs-on: sylphx-linux-standard
     outputs:
       repositories: ${{ steps.scope.outputs.repositories }}
     steps:
@@ -45,7 +45,7 @@ jobs:
   # sane timeout, and one slow repository must not starve the rest.
   renovate:
     needs: plan
-    runs-on: ubuntu-latest
+    runs-on: sylphx-linux-standard
     environment: renovate
     timeout-minutes: 45
     strategy:

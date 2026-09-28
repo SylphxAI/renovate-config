@@ -119,6 +119,7 @@
     "**/android/.gradle/**",
     "**/node_modules/**",
     "**/vendor/**",
+    "**/third_party/**",
     "**/.cache/**",
     "**/dist/**",
     "**/build/**"

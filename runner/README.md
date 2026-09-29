@@ -11,7 +11,9 @@ plus 04:00 UTC) and on `workflow_dispatch`.
   the workflow runs one Renovate job per entry, eight at a time. Renovate skips
   an archived repository. `citra` and `kernox` are left out on purpose:
   Dependabot owns every ecosystem there, and one updater per ecosystem avoids
-  duplicate PRs. Add a repository by adding it to the list.
+  duplicate PRs. Add a repository by adding it to the list. A repository whose `sylphx_delivery`
+  custom property is `delivered` (a finished customer project) is skipped at
+  plan time, whatever the list says.
 - **One updater per ecosystem**: the enforced org code security configuration
   turns on Dependabot security updates, so Dependabot opens vulnerability PRs
   and Renovate (`vulnerabilityAlerts.enabled: false` in the preset) opens

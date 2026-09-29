@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   plan:
+    environment: renovate
     # GitHub's free standard hosted runner (a public repository, owner#750):
     # on our runners one leg per run lost its runner mid-job (2026-09-26/27).
     runs-on: ubuntu-latest
@@ -40,8 +41,31 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Mint org installation token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RENOVATE_APP_ID }}
+          private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
+          owner: SylphxAI
+      # A repository whose `sylphx_delivery` custom property is `delivered` is a
+      # finished customer project: it gets no automated PRs. The read fails
+      # closed (the job fails) so an unreadable property never opens PRs.
       - id: scope
-        run: echo "repositories=$(jq -c .repositories runner/config.json)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          keep=()
+          for repo in $(jq -r '.repositories[]' runner/config.json); do
+            value=$(gh api "repos/${repo}/properties/values" --jq '.[] | select(.property_name == "sylphx_delivery") | .value')
+            if [ "${value}" = "delivered" ]; then
+              echo "::notice::skipping ${repo}: sylphx_delivery=delivered"
+            else
+              keep+=("${repo}")
+            fi
+          done
+          echo "repositories=$(printf '%s\n' "${keep[@]}" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
 
   # One job per repository: a serial pass over the whole scope outlives any
   # sane timeout, and one slow repository must not starve the rest.

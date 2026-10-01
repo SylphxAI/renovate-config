@@ -32,7 +32,8 @@ here reaches every repository that extends it on its next run.
 | Majors | labelled `breaking`, never automerged |
 | Limits | 4 new pull requests per hour, 8 open at once |
 | Automerge method | the platform's own auto-merge, so a merge queue or required checks still apply |
-| Security fixes | off in Renovate (`vulnerabilityAlerts`), because Dependabot security updates open them; one tool per fix avoids duplicate pull requests |
+| Security fixes | on in Renovate (`vulnerabilityAlerts`), labelled `security`; they open even during the dependency hold |
+| Dependency hold | until 2026-10-10 every non-security update and lock file maintenance is off (sprint rule: CI only for revenue PRs); after it, majors arrive weekly in one draft PR |
 | GitHub Actions | pinned to commit digests |
 | Docker images | pinned to digests, labelled `docker-update` |
 | Ignored paths | `node_modules`, `vendor`, `dist`, `build`, `.cache`, `ios/Pods`, `android/.gradle` |

@@ -18,15 +18,22 @@
   "prHourlyLimit": 4,
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
-    "description": "Dependabot security updates own vulnerability PRs (org code security configuration); Renovate owns version updates, so the two never open the same fix.",
-    "enabled": false
+    "description": "Security fixes still open PRs during the dependency hold, labelled security. Dependabot security updates may open the same fix; close the duplicate.",
+    "enabled": true,
+    "labels": ["dependencies", "security"]
   },
   "lockFileMaintenance": {
-    "enabled": true,
+    "description": "Off during the dependency hold until 2026-10-10; set back to true then.",
+    "enabled": false,
     "automerge": true,
     "schedule": ["before 6am on monday"]
   },
   "packageRules": [
+    {
+      "description": "HOLD until 2026-10-10 (sprint rule: CI only for revenue PRs). Disables every non-security update; vulnerabilityAlerts still open PRs. Remove this rule on 2026-10-10.",
+      "matchPackageNames": ["*"],
+      "enabled": false
+    },
     {
       "description": "Non-major updates merge unattended through the queue",
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
@@ -37,6 +44,13 @@
       "matchUpdateTypes": ["major"],
       "labels": ["dependencies", "breaking"],
       "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "After the hold: majors arrive grouped, weekly, as drafts so PR CI stays idle until an agent picks one up",
+      "matchUpdateTypes": ["major"],
+      "groupName": "major updates",
+      "schedule": ["before 6am on monday"],
+      "draftPR": true
     },
     {
       "description": "Type definitions are safe to batch and merge",

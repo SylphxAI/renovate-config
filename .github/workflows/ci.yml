@@ -28,3 +28,15 @@ jobs:
           fi
       - name: Validate Renovate JSON
         run: python3 scripts/validate_renovate.py
+
+  # The required check (docs/ci-template.md and docs/optimistic-merge.md in
+  # SylphxAI/.github): one aggregate whose name is `ci-ok`, so a required
+  # status check resolves on every pull request and merge group. Skipped lanes
+  # pass; a failed lane fails.
+  ci-ok:
+    if: always()
+    needs: [validate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: '[ "${{ needs.validate.result }}" = success ]'

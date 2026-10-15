@@ -4,6 +4,13 @@ name: Renovate
 # SylphxAI/.github actions and reusable workflows. Scope (`repositories`),
 # the App-install set (`orgs`) and defaults live in runner/config.json; the
 # credential contract is in runner/README.md.
+#
+# This file was `renovate.yml`. GitHub stopped creating jobs for that file's
+# registration on 2026-10-06 while its body stayed valid: from 2026-10-11 every
+# dispatch and schedule sat `pending` with zero jobs, and a byte-identical copy
+# under another name (tested 2026-10-15) queued a job in seconds. The workflow
+# is therefore carried under a new file name; the stale registration is dropped
+# with the old path.
 on:
   schedule:
     # The org preset only opens PRs 22:00-06:00 Asia/Hong_Kong (14:00-22:00
@@ -33,6 +40,10 @@ concurrency:
 
 jobs:
   plan:
+    # The App id/private key live in this environment (see runner/README.md);
+    # the environment has no required reviewers and allows `main` only, so it
+    # never waits for approval.
+    environment: renovate
     # GitHub's free standard hosted runner (a public repository, owner#750):
     # on our runners one leg per run lost its runner mid-job (2026-09-26/27).
     runs-on: ubuntu-latest
@@ -76,6 +87,7 @@ jobs:
   # sane timeout, and one slow repository must not starve the rest.
   renovate:
     needs: plan
+    environment: renovate
     # GitHub's free standard hosted runner (a public repository, owner#750):
     # on our runners one leg per run lost its runner mid-job (2026-09-26/27).
     runs-on: ubuntu-latest

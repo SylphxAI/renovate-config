@@ -35,7 +35,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: renovate
+  # A run is `pending` with no jobs while any run shares this group. The
+  # previous group name `renovate` became permanently wedged on 2026-10-06 (no
+  # run held it yet nothing queued), so the group is a fresh name; the probe
+  # that queued in seconds when the group differed is what identified this.
+  group: dependency-updates
   cancel-in-progress: false
 
 jobs:

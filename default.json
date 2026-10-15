@@ -64,6 +64,13 @@
       "pinDigests": true
     },
     {
+      "description": "SylphxAI/.github holds the shared gate actions every repository pins (needs-pass, ci-ok, main-red-gate, secret-scan, ...). Group every one of its pins into a single pull request per repository and merge it unattended, so a verifier fix in .github reaches every caller on the next Renovate run instead of sitting at a stale SHA. Renovate follows .github main through the branch name in each pin's version comment; a pin with no `# main` comment is invisible to it and is caught instead by the shared-action pin drift check (SylphxAI/.github scripts/action_pin_drift_check.py).",
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["SylphxAI/.github"],
+      "groupName": "SylphxAI/.github shared actions",
+      "automerge": true
+    },
+    {
       "matchDatasources": ["docker"],
       "labels": ["docker-update"]
     },

@@ -30,6 +30,10 @@ on:
         type: choice
         options: ["off", lookup, full]
         default: "off"
+      force:
+        description: Ignore the preset schedule window and open pull requests now
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -149,6 +153,9 @@ jobs:
         env:
           LOG_LEVEL: ${{ inputs.log-level || 'info' }}
           RENOVATE_DRY_RUN: ${{ inputs.dry-run != 'off' && inputs.dry-run || '' }}
+          # A forced run ignores the preset's 22:00-06:00 Hong Kong window and
+          # opens pull requests at any hour; the schedule is otherwise honoured.
+          RENOVATE_SCHEDULE: ${{ inputs.force && '[]' || '' }}
           RENOVATE_REPOSITORIES: ${{ matrix.repository }}
           RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
           RENOVATE_USERNAME: ${{ steps.app.outputs.app-slug }}[bot]

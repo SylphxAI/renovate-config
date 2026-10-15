@@ -2,9 +2,9 @@
 
 The hosted Mend app stopped producing PRs for the org in July 2026 and needs a
 human sign-in to recover, so Renovate runs here instead:
-[`.github/workflows/renovate.yml`](../.github/workflows/renovate.yml) on a
-schedule (hourly 14:00-22:00 UTC, the preset's 22:00-06:00 Hong Kong window,
-plus 04:00 UTC) and on `workflow_dispatch`.
+[`.github/workflows/dependency-updates.yml`](../.github/workflows/dependency-updates.yml)
+on a schedule (hourly 14:00-22:00 UTC, the preset's 22:00-06:00 Hong Kong
+window, plus 04:00 UTC) and on `workflow_dispatch`.
 
 - **Scope**: `repositories` in [`config.json`](config.json) - every repository
   in the company portfolio whose workflows pin the shared `SylphxAI/.github`
@@ -23,19 +23,20 @@ plus 04:00 UTC) and on `workflow_dispatch`.
   without an onboarding PR; a repository's own Renovate config overrides it.
 - **Auth**: a GitHub App installation token minted per run with
   `actions/create-github-app-token`, one per matrix repository's org. The App id
-  is the repository variable `RENOVATE_APP_ID`, the key the repository secret
-  `RENOVATE_APP_PRIVATE_KEY`. The app is installed once on each org in
-  `config.json` `orgs`; a repository under an org the App is not installed on
-  fails its own job only. PRs opened with an App token trigger CI, so the
-  preset's non-major automerge lands through each repository's merge queue.
+  is the `renovate` environment variable `RENOVATE_APP_ID`, the key the
+  environment secret `RENOVATE_APP_PRIVATE_KEY`; the environment deploys from
+  `main` only and has no required reviewers, so it never waits for approval. The
+  App is installed once on each org in `config.json` `orgs`; a repository under
+  an org the App is not installed on fails its own job only. PRs opened with an
+  App token trigger CI, so the preset's non-major automerge lands through each
+  repository's merge queue.
 
-  The jobs carry **no** `environment:`. An environment gate on this repository
-  stopped creating deployments on 2026-10-06 while its configuration stayed
-  correct, so from 2026-10-11 every scheduled run was `cancelled` with zero jobs
-  and no runner was ever allocated. The credentials live in repository secrets,
-  which a `schedule`/`workflow_dispatch` run on the default branch reads; a
-  public repository never exposes them to a fork pull request, so the protection
-  the `main`-only environment gave is kept without the gate.
+  Why the file is not called `renovate.yml`: GitHub stopped creating jobs for
+  that file's workflow registration on 2026-10-06 while its body stayed valid.
+  From 2026-10-11 every dispatch and schedule sat `pending` with zero jobs and no
+  runner was ever allocated. A byte-identical copy under another name queued a
+  job in seconds when tested on 2026-10-15, so the workflow is carried under a
+  new file name and the stale registration is dropped with the old path.
 
 ## The App
 
@@ -61,9 +62,8 @@ web UI):
    `config.json` `orgs` (SylphxAI, Cubeage, Cubeage-limited, EpiowAI,
    OzyrixLtd), all repositories. An org the App is missing is left out of
    scope until it is installed.
-3. `gh variable set RENOVATE_APP_ID -R SylphxAI/renovate-config --body <id>` and
-   `gh secret set RENOVATE_APP_PRIVATE_KEY -R SylphxAI/renovate-config < key.pem`
-   (repository scope, not an environment).
+3. `gh variable set RENOVATE_APP_ID -R SylphxAI/renovate-config --env renovate --body <id>`
+   and `gh secret set RENOVATE_APP_PRIVATE_KEY -R SylphxAI/renovate-config --env renovate < key.pem`.
 
 ## Adding an org
 

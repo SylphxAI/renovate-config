@@ -59,12 +59,6 @@
       "pinDigests": true
     },
     {
-      "description": "Carry a shared-action pin whose trailing comment is not a valid ref (e.g. '# main after #150'). Renovate reads the digest from the pinned value itself, so the comment is not needed to update it.",
-      "matchManagers": ["github-actions"],
-      "matchCurrentValue": "/^[0-9a-f]{40}$/",
-      "extractVersion": "^(?<version>[0-9a-f]{40})$"
-    },
-    {
       "matchDatasources": ["docker"],
       "labels": ["docker-update"]
     },

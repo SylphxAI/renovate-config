@@ -48,17 +48,6 @@ a GitHub Actions pin (which always lives in a workflow file) cannot be carried.
 computes those updates, but each push is refused until the App can write
 workflows.
 
-A shared-action pin is a bare SHA with a trailing comment that names the ref
-(`SylphxAI/.github/.github/actions/rust-sccache@<sha> # main`). Renovate reads
-that comment: a SHA with no valid ref comment is left off by default and the
-dependency is reported `unversioned-reference`, so no update is ever computed
-for it. The preset therefore reads the digest from the pinned value itself
-(`extractVersion` over a 40-hex `matchCurrentValue` in
-[`default.json`](../default.json)), which makes every pin updated whether or not
-its comment resolves - 45 callers cannot be kept in step one comment at a time.
-An action whose reference is a plain tag or branch (for example
-`actions/checkout@v6`) is unaffected and keeps its comment-driven update.
-
 The target is a dedicated **Sylphx Renovate** App with `workflows: write`. This
 is a one-time org-owner step (creating an App and installing it needs the GitHub
 web UI):

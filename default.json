@@ -23,17 +23,12 @@
     "labels": ["dependencies", "security"]
   },
   "lockFileMaintenance": {
-    "description": "Off during the dependency hold until 2026-10-10; set back to true then.",
-    "enabled": false,
+    "description": "Weekly lock file refresh, merged unattended.",
+    "enabled": true,
     "automerge": true,
     "schedule": ["before 6am on monday"]
   },
   "packageRules": [
-    {
-      "description": "HOLD until 2026-10-10 (sprint rule: CI only for revenue PRs). Disables every non-security update; vulnerabilityAlerts still open PRs. Remove this rule on 2026-10-10.",
-      "matchPackageNames": ["*"],
-      "enabled": false
-    },
     {
       "description": "Non-major updates merge unattended through the queue",
       "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],

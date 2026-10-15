@@ -1,7 +1,9 @@
 name: Renovate
 
-# Self-hosted Renovate for the SylphxAI org. Scope (`repositories`), defaults
-# and the reason for each live in runner/config.json; the credential contract is in runner/README.md.
+# Self-hosted Renovate for every org whose repositories call the shared
+# SylphxAI/.github actions and reusable workflows. Scope (`repositories`),
+# the App-install set (`orgs`) and defaults live in runner/config.json; the
+# credential contract is in runner/README.md.
 on:
   schedule:
     # The org preset only opens PRs 22:00-06:00 Asia/Hong_Kong (14:00-22:00
@@ -31,12 +33,11 @@ concurrency:
 
 jobs:
   plan:
-    environment: renovate
     # GitHub's free standard hosted runner (a public repository, owner#750):
     # on our runners one leg per run lost its runner mid-job (2026-09-26/27).
     runs-on: ubuntu-latest
     outputs:
-      repositories: ${{ steps.scope.outputs.repositories }}
+      jobs: ${{ steps.scope.outputs.jobs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,23 +50,27 @@ jobs:
           private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
           owner: SylphxAI
       # A repository whose `sylphx_delivery` custom property is `delivered` is a
-      # finished customer project: it gets no automated PRs. The read fails
-      # closed (the job fails) so an unreadable property never opens PRs.
+      # finished customer project: it gets no automated PRs. The property exists
+      # only in SylphxAI; the read fails closed there (the job fails) so an
+      # unreadable property never opens PRs. The other orgs have no
+      # `sylphx_delivery` property, so nothing there can be delivered.
       - id: scope
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: |
           set -euo pipefail
-          keep=()
+          jobs="[]"
           for repo in $(jq -r '.repositories[]' runner/config.json); do
-            value=$(gh api "repos/${repo}/properties/values" --jq '.[] | select(.property_name == "sylphx_delivery") | .value')
-            if [ "${value}" = "delivered" ]; then
-              echo "::notice::skipping ${repo}: sylphx_delivery=delivered"
-            else
-              keep+=("${repo}")
+            if [ "${repo%%/*}" = "SylphxAI" ]; then
+              value=$(gh api "repos/${repo}/properties/values" --jq '.[] | select(.property_name == "sylphx_delivery") | .value')
+              if [ "${value}" = "delivered" ]; then
+                echo "::notice::skipping ${repo}: sylphx_delivery=delivered"
+                continue
+              fi
             fi
+            jobs=$(printf '%s' "${jobs}" | jq -c --arg r "${repo}" '. + [$r]')
           done
-          echo "repositories=$(printf '%s\n' "${keep[@]}" | jq -R . | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "jobs=${jobs}" >> "$GITHUB_OUTPUT"
 
   # One job per repository: a serial pass over the whole scope outlives any
   # sane timeout, and one slow repository must not starve the rest.
@@ -74,29 +79,44 @@ jobs:
     # GitHub's free standard hosted runner (a public repository, owner#750):
     # on our runners one leg per run lost its runner mid-job (2026-09-26/27).
     runs-on: ubuntu-latest
-    environment: renovate
     timeout-minutes: 45
     strategy:
       fail-fast: false
       max-parallel: 8
       matrix:
-        repository: ${{ fromJSON(needs.plan.outputs.repositories) }}
+        repository: ${{ fromJSON(needs.plan.outputs.jobs) }}
     name: renovate (${{ matrix.repository }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      # A per-org installation token: the same Renovate App, installed on each
+      # org in runner/config.json `orgs`. `owner` is the matrix repository's
+      # org, so a repo added under a new org needs only the App installed there.
+      - id: org
+        run: echo "owner=${REPO%%/*}" >> "$GITHUB_OUTPUT"
+        env:
+          REPO: ${{ matrix.repository }}
+
       - name: Mint org installation token
         id: app
+        continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.RENOVATE_APP_ID }}
           private-key: ${{ secrets.RENOVATE_APP_PRIVATE_KEY }}
-          owner: SylphxAI
+          owner: ${{ steps.org.outputs.owner }}
+
+      # An org the App is not installed on cannot be updated; report it and stop
+      # this repository's job rather than failing it.
+      - name: Report an org without the App
+        if: steps.app.outcome == 'failure'
+        run: echo "::notice::the Renovate App is not installed on ${{ steps.org.outputs.owner }}; skipping ${{ matrix.repository }}"
 
       - name: Resolve bot git identity
         id: bot
+        if: steps.app.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           SLUG: ${{ steps.app.outputs.app-slug }}
@@ -105,6 +125,7 @@ jobs:
           echo "author=${SLUG}[bot] <${id}+${SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
 
       - name: Renovate
+        if: steps.app.outcome == 'success'
         uses: renovatebot/github-action@9fea9f0fbf80401026d11d03911d62b1f70fef1f # v46.3.3
         with:
           token: ${{ steps.app.outputs.token }}

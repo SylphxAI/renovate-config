@@ -42,6 +42,7 @@ Grouped into one pull request each, with a label:
 
 | Group | Matches |
 | --- | --- |
+| SylphxAI/.github shared actions | every `uses: SylphxAI/.github/...` pin (needs-pass, ci-ok, main-red-gate, ...), one pull request per repository, automerged on green |
 | TypeScript type definitions | `@types/*` |
 | React packages | `react`, `react-*`, `@react/*`, `@types/react*` |
 | Effect packages | `effect`, `@effect/*` |

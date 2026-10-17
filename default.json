@@ -13,9 +13,15 @@
   "dependencyDashboardTitle": "Dependency Dashboard",
   "labels": ["dependencies"],
   "rebaseWhen": "conflicted",
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
   "platformAutomerge": true,
-  "prConcurrentLimit": 8,
-  "prHourlyLimit": 4,
+  "pruneStaleBranches": true,
+  "separateMajorMinor": true,
+  "separateMultipleMajor": false,
+  "separateMinorPatch": false,
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 2,
   "minimumReleaseAge": "3 days",
   "vulnerabilityAlerts": {
     "description": "Security fixes still open PRs during the dependency hold, labelled security. Dependabot security updates may open the same fix; close the duplicate.",
@@ -35,17 +41,11 @@
       "automerge": true
     },
     {
-      "description": "Majors need an agent decision; keep them visible and rare",
+      "description": "Each major keeps one pull request on its own branch. A newer release of that major updates the same pull request. It does not automerge.",
       "matchUpdateTypes": ["major"],
       "labels": ["dependencies", "breaking"],
-      "minimumReleaseAge": "7 days"
-    },
-    {
-      "description": "After the hold: majors arrive grouped, weekly, as drafts so PR CI stays idle until an agent picks one up",
-      "matchUpdateTypes": ["major"],
-      "groupName": "major updates",
-      "schedule": ["before 6am on monday"],
-      "draftPR": true
+      "minimumReleaseAge": "7 days",
+      "automerge": false
     },
     {
       "description": "Type definitions are safe to batch and merge",

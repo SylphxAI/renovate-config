@@ -29,11 +29,11 @@ here reaches every repository that extends it on its next run.
 | Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`) |
 | Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS |
 | Automerge | minor, patch, digest and pin updates, `@types/*`, and weekly lock file maintenance (Monday before 6am) |
-| Majors | labelled `breaking`, never automerged |
-| Limits | 4 new pull requests per hour, 8 open at once |
-| Automerge method | the platform's own auto-merge, so a merge queue or required checks still apply |
-| Security fixes | on in Renovate (`vulnerabilityAlerts`), labelled `security`; they open even during the dependency hold |
-| Dependency hold | until 2026-10-10 every non-security update and lock file maintenance is off (sprint rule: CI only for revenue PRs); after it, majors arrive weekly in one draft PR |
+| Branches | one branch per dependency; a newer version updates that same pull request, and Renovate closes a superseded branch |
+| Majors | one pull request per dependency, labelled `breaking`, not automerged |
+| Limits | 2 new pull requests per hour, 3 open at once, per repository |
+| Automerge method | the platform's own auto-merge, using squash, so a squash-only merge queue and required checks still apply |
+| Security fixes | on in Renovate (`vulnerabilityAlerts`), labelled `security` |
 | GitHub Actions | pinned to commit digests |
 | Docker images | pinned to digests, labelled `docker-update` |
 | Ignored paths | `node_modules`, `vendor`, `dist`, `build`, `.cache`, `ios/Pods`, `android/.gradle` |

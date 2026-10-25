@@ -134,16 +134,6 @@ jobs:
         if: steps.app.outcome == 'failure'
         run: echo "::notice::the Renovate App is not installed on ${{ steps.org.outputs.owner }}; skipping ${{ matrix.repository }}"
 
-      - name: Resolve bot git identity
-        id: bot
-        if: steps.app.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ steps.app.outputs.token }}
-          SLUG: ${{ steps.app.outputs.app-slug }}
-        run: |
-          id=$(gh api "users/${SLUG}%5Bbot%5D" --jq .id)
-          echo "author=${SLUG}[bot] <${id}+${SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
-
       - name: Renovate
         if: steps.app.outcome == 'success'
         uses: renovatebot/github-action@9fea9f0fbf80401026d11d03911d62b1f70fef1f # v46.3.3
@@ -157,5 +147,5 @@ jobs:
           # opens pull requests at any hour; the schedule is otherwise honoured.
           RENOVATE_SCHEDULE: ${{ inputs.force && '[]' || '' }}
           RENOVATE_REPOSITORIES: ${{ matrix.repository }}
-          RENOVATE_GIT_AUTHOR: ${{ steps.bot.outputs.author }}
+          RENOVATE_GIT_AUTHOR: "renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>"
           RENOVATE_USERNAME: ${{ steps.app.outputs.app-slug }}[bot]

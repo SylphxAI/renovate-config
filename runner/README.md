@@ -59,8 +59,8 @@ web UI):
    read; Administration - read. Organization: Members - read. Only on this
    account.
 2. Generate a private key; install the App on every org in
-   `config.json` `orgs` (SylphxAI, Cubeage, Cubeage-limited, EpiowAI,
-   OzyrixLtd), all repositories. An org the App is missing is left out of
+   `config.json` `orgs` (SylphxAI, Cubeage, EpiowAI, OzyrixLtd), all
+   repositories. An org the App is missing is left out of
    scope until it is installed.
 3. `gh variable set RENOVATE_APP_ID -R SylphxAI/renovate-config --env renovate --body <id>`
    and `gh secret set RENOVATE_APP_PRIVATE_KEY -R SylphxAI/renovate-config --env renovate < key.pem`.

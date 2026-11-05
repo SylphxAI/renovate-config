@@ -77,3 +77,19 @@ A repository whose `sylphx_delivery` custom property is `delivered` is a
 finished customer project and never receives an automated PR. The plan job reads
 the property for every repository in scope and drops the ones set to
 `delivered`; the read fails closed so an unreadable property never opens PRs.
+
+## Commit identity and existing branches
+
+`ignorePrAuthor: true` lets the runner discover existing dependency PRs even
+when they were opened under a previous Renovate identity. It does not relax
+the commit-author checks protecting human edits.
+
+Dependency commits use `Kyle Tse <hi@kylet.se>`, matching the contribution
+policy. The runner also recognizes the two exact historical dependency-bot
+emails through `gitIgnoredAuthors`; it does not treat other authors as safe to
+overwrite. This keeps old bot-only branches eligible for conflict rebases and
+version updates without discarding a person's edits.
+
+Keep `rebaseWhen: conflicted`: merge queues test against current main. A queue
+ruleset must not additionally require the PR branch to be up to date; that
+would strand already-armed updates and require redundant full CI on rebases.

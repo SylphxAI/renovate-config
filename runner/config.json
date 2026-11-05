@@ -92,5 +92,11 @@
   ],
   "github-actions": {
     "enabled": true
-  }
+  },
+  "ignorePrAuthor": true,
+  "gitAuthor": "Kyle Tse <hi@kylet.se>",
+  "gitIgnoredAuthors": [
+    "261101846+sylphx-builder[bot]@users.noreply.github.com",
+    "29139614+renovate[bot]@users.noreply.github.com"
+  ]
 }

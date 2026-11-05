@@ -147,5 +147,5 @@ jobs:
           # opens pull requests at any hour; the schedule is otherwise honoured.
           RENOVATE_SCHEDULE: ${{ inputs.force && '[]' || '' }}
           RENOVATE_REPOSITORIES: ${{ matrix.repository }}
-          RENOVATE_GIT_AUTHOR: "renovate[bot] <29139614+renovate[bot]@users.noreply.github.com>"
+          RENOVATE_GIT_AUTHOR: "Kyle Tse <hi@kylet.se>"
           RENOVATE_USERNAME: ${{ steps.app.outputs.app-slug }}[bot]

@@ -80,6 +80,10 @@ the property for every repository in scope and drops the ones set to
 
 ## Commit identity and existing branches
 
+`ignorePrAuthor: true` lets the runner discover existing dependency PRs even
+when they were opened under a previous Renovate identity. It does not relax
+the commit-author checks protecting human edits.
+
 Dependency commits use `Kyle Tse <hi@kylet.se>`, matching the contribution
 policy. The runner also recognizes the two exact historical dependency-bot
 emails through `gitIgnoredAuthors`; it does not treat other authors as safe to

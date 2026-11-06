@@ -26,8 +26,8 @@ here reaches every repository that extends it on its next run.
 | Setting | Value |
 | --- | --- |
 | Based on | `config:recommended`, dependency dashboard, semantic commit messages, monorepo and recommended grouping |
-| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`) |
-| Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS |
+| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`); owned `SylphxAI/.github` shared-action pins use 1am to 2am, selecting one hourly runner pass per day |
+| Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS. Owned `SylphxAI/.github` shared-action pins have no age delay: their continuously moving `main` must not reset a waiting period. |
 | Automerge | minor, patch, digest and pin updates, `@types/*`, and weekly lock file maintenance (Monday before 6am) |
 | Branches | one branch per dependency; a newer version updates that same pull request, and Renovate closes a superseded branch |
 | Majors | one pull request per dependency, labelled `breaking`, not automerged |

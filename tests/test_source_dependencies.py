@@ -7,9 +7,154 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runner'))
 from source_dependencies import dependency_paths, touches
-from shared_pins import admit_regular, changes_since_pin, regular_due, engine_config, main
-from pin_plan import regular_weekday
+from shared_pins import admit_regular, changes_since_pin, regular_due, engine_config, main, source_reader
+from pin_plan import regular_weekday, parse_pins, plan_repo
+from github_io import Refused
+import hashlib
 from datetime import datetime, timezone
+
+
+class SourceGitHub:
+    """Immutable source tree/blob fixture with provider read accounting."""
+    def __init__(self, sources):
+        self.sources, self.requests, self.reads = sources, [], []
+        self.truncated = set()
+        self.failed_reads = set()
+
+    def request(self, path):
+        self.requests.append(path)
+        ref = path.split('/git/trees/', 1)[1].split('?', 1)[0]
+        if ref not in self.sources:
+            raise Refused('github-request-refused')
+        return {'truncated': ref in self.truncated, 'tree': [
+            {'path': path, 'sha': hashlib.sha256(text.encode()).hexdigest(), 'type': 'blob'}
+            for path, text in self.sources[ref].items()]}
+
+    def text(self, repo, path, ref):
+        self.reads.append((repo, path, ref))
+        if (path, ref) in self.failed_reads:
+            raise Refused('github-request-refused')
+        return self.sources[ref][path]
+
+
+class HistoricalConsumption(unittest.TestCase):
+    old, target = 'a' * 40, 'b' * 40
+    root = '.github/actions/a'
+
+    def fixture(self):
+        sources = {
+            self.old: {self.root + '/action.yml': 'run: python scripts/old.py',
+                       'scripts/old.py': 'import helper', 'scripts/helper.py': 'pass'},
+            self.target: {self.root + '/action.yml': 'run: python scripts/new.py',
+                          'scripts/new.py': 'pass', 'scripts/unrelated.py': 'pass'}}
+        files = {'.github/workflows/ci.yml':
+                 f'steps:\n  - uses: SylphxAI/.github/{self.root}@{self.old} # main\n'}
+        return SourceGitHub(sources), files, parse_pins(files)
+
+    def test_removed_historical_helper_fix_qualifies_without_unrelated_churn(self):
+        for changed in ('scripts/old.py', 'scripts/helper.py'):
+            with self.subTest(changed=changed):
+                gh, files, pins = self.fixture()
+                source_reader(gh, self.target)(pins)
+                fixes = [{'sha': 'c' * 40, 'merged_at': '2026-11-01T00:00:00Z',
+                          'files': [changed], 'behind_pins': [self.old]},
+                         {'sha': 'd' * 40, 'merged_at': '2026-11-02T00:00:00Z',
+                          'files': ['scripts/unrelated.py'], 'behind_pins': [self.old]}]
+                result = plan_repo('SylphxAI/fixture', files, self.target, fixes, [],
+                                   datetime(2026, 11, 7, tzinfo=timezone.utc), [], False, pins=pins)
+                self.assertEqual([f['sha'] for f in result['qualifying_fixes']], ['c' * 40])
+                self.assertTrue(result['should_open'])
+                self.assertEqual(pins[0]['dependency_paths'], [self.root + '/action.yml',
+                                 'scripts/helper.py', 'scripts/new.py', 'scripts/old.py'])
+
+    def test_revision_and_blob_reuse_keeps_distinct_pin_closures(self):
+        gh, _, pins = self.fixture()
+        # Same roots at the new ref must not inherit old-ref consumption from
+        # the closure cache; identical blobs across refs require only one read.
+        gh.sources[self.target]['scripts/new.py'] = 'import shared\nprint("target")'
+        gh.sources[self.old]['scripts/old.py'] = 'import shared\nprint("old")'
+        for source in gh.sources.values():
+            source['scripts/shared.py'] = 'print("shared")'
+        newer = dict(pins[0], sha=self.target)
+        enrich = source_reader(gh, self.target)
+        enrich([*pins, newer])
+        enrich(pins)
+        self.assertEqual(len(gh.requests), 2)
+        self.assertEqual(len(gh.reads), 5)  # 2 actions + 2 entry scripts + shared blob.
+        self.assertIn('scripts/old.py', pins[0]['dependency_paths'])
+        self.assertNotIn('scripts/old.py', newer['dependency_paths'])
+        self.assertIn('scripts/shared.py', newer['dependency_paths'])
+
+    def test_truncated_and_unreadable_history_refuse_instead_of_empty_closure(self):
+        for mode in ('truncated', 'missing', 'blob'):
+            with self.subTest(mode=mode):
+                gh, _, pins = self.fixture()
+                if mode == 'truncated':
+                    gh.truncated.add(self.old)
+                elif mode == 'missing':
+                    del gh.sources[self.old]
+                else:
+                    gh.failed_reads.add((self.root + '/action.yml', self.old))
+                enrich = source_reader(gh, self.target)
+                with self.assertRaisesRegex(Refused, 'source-dependencies-unreadable:' + self.old):
+                    enrich(pins)
+                self.assertNotIn('dependency_paths', pins[0])
+                # A transient/incomplete answer must not become a permanent
+                # cached empty closure in the same reader.
+                gh.truncated.clear()
+                gh.failed_reads.clear()
+                if mode == 'missing':
+                    gh.sources[self.old] = {self.root + '/action.yml': 'run: python scripts/old.py',
+                                            'scripts/old.py': 'pass'}
+                enrich(pins)
+                self.assertIn('scripts/old.py', pins[0]['dependency_paths'])
+
+    def test_unreadable_historical_source_is_reported_and_never_published(self):
+        gh, files, _ = self.fixture()
+        del gh.sources[self.old]
+        source_request, source_text = gh.request, gh.text
+        repo = 'SylphxAI/fixture'
+        consumer_head = 'e' * 40
+        portfolio = ('## Drive — Projects\n| # | Product | Repository | Owns |\n'
+                     '|---|---|---|---|\n| 1 | Fixture | `' + repo + '` | Active |\n')
+        def request(path):
+            values = {'repos/SylphxAI/owner/commits/main': {'sha': 'f' * 40},
+                      'repos/SylphxAI/.github/commits/main': {'sha': self.target},
+                      'repos/' + repo: {'archived': False, 'default_branch': 'main'},
+                      'repos/' + repo + '/commits/main': {'sha': consumer_head},
+                      'repos/' + repo + '/git/matching-refs/heads/renovate/shared-ci-': [],
+                      'repos/' + repo + '/git/trees/' + consumer_head + '?recursive=1': {
+                          'tree': [{'type': 'blob', 'path': path, 'sha': '1' * 40}
+                                   for path in files]}}
+            return values[path] if path in values else source_request(path)
+        def text(name, path, ref):
+            if name == 'SylphxAI/owner':
+                return portfolio
+            return files[path] if name == repo else source_text(name, path, ref)
+        gh.request, gh.text, gh.pages = request, text, lambda _: []
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch('shared_pins.GitHub', return_value=gh), patch('shared_pins.run_engine') as engine, \
+                    patch('shared_pins.verify_and_arm') as arm:
+                self.assertEqual(main(['--state-dir', str(root / 'state'), '--cache-root', str(root / 'cache'),
+                                       '--apply']), 0)
+                engine.assert_not_called()
+                arm.assert_not_called()
+            report = json.loads((root / 'state/report.json').read_text())
+            self.assertEqual(report['active_roster'], [repo])
+            self.assertEqual(len(report['alerts']), 1)
+            self.assertIn('source-dependencies-unreadable:' + self.old, report['alerts'][0]['reason'])
+            self.assertIn('error', report['repositories'][0])
+            self.assertTrue((root / 'state/lag.trigger').is_file())
+
+    def test_unsupported_or_unresolved_refs_do_not_fetch_invented_history(self):
+        gh, _, pins = self.fixture()
+        unsupported = dict(pins[0], sha=None, ref='main')
+        unresolved = dict(pins[0], roots=[''])
+        current = dict(pins[0], sha=self.target)
+        source_reader(gh, self.target)([unsupported, unresolved, current])
+        self.assertEqual(len(gh.requests), 1)
+        self.assertEqual(unresolved['dependency_paths'], [])
 
 
 class DeclaredConsumption(unittest.TestCase):

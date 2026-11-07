@@ -27,7 +27,8 @@ is skipped even if the portfolio has not caught up.
 - Expedited: label a source PR **`shared-action-fix`** before or after its merge.
   A merged labelled PR qualifies only where its changed action/workflow path is
   consumed and the old pin is proven behind its merge SHA. Only explicitly
-  referenced shared scripts and their declared import closure affect a caller;
+  referenced shared scripts and their declared import closure at either the
+  existing pin or target revision affect a caller;
   unresolved consumption is unknown, not whole-source eligibility. Fix rolls
   bypass the weekday and open-PR cap. The full merge SHA is the idempotency key.
   The latest missing qualifying fix in a pass groups the pending fixes.
@@ -40,7 +41,8 @@ Branches are `renovate/shared-ci-week-YYYY-NN` or
 `renovate/shared-ci-fix-<40-character merge SHA>`. Existing keys are never
 rebased, force-pushed, recreated or retargeted. A blocked immutable PR requires
 operator review; its continued lag stays visible. No emergency or older pin PR
-is edited or closed. An unreadable repository is excluded from writes and reported unknown, never green.
+is edited or closed. An unreadable repository or historical source dependency
+tree/blob is excluded from writes and reported unknown, never green.
 A non-ancestor pin can be proposed but cannot auto-arm; its PR body names the
 ancestry failure and the report retains it for operator review.
 The report includes per-repo static PR job expansion (finite matrices and local

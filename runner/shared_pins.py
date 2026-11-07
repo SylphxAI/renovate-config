@@ -257,22 +257,51 @@ def changes_since_pin(gh, pins, head, fix_rows):
 
 
 def source_reader(gh, target):
-    tree = gh.request(f'repos/{SOURCE}/git/trees/{target}?recursive=1')
-    if tree.get('truncated'):
-        raise Refused('source-tree-truncated')
-    paths = [e['path'] for e in tree['tree'] if e['type'] == 'blob' and
-             e['path'].startswith(('.github/actions/', '.github/workflows/', 'scripts/'))]
-    texts, closures = {}, {}
+    """Resolve declared consumption at both immutable ends of each pin roll.
+
+    Target-only closure loses a helper removed or replaced after a marked fix.
+    Cache complete trees/closures by revision and successful text by blob SHA;
+    an unreadable historical input remains unknown, never an empty closure.
+    """
+    trees, texts, closures = {}, {}, {}
+
+    def tree(ref):
+        if ref not in trees:
+            value = gh.request(f'repos/{SOURCE}/git/trees/{ref}?recursive=1')
+            if value.get('truncated'):
+                raise Refused('source-tree-truncated')
+            trees[ref] = {e['path']: e['sha'] for e in value['tree'] if e['type'] == 'blob' and
+                          e['path'].startswith(('.github/actions/', '.github/workflows/', 'scripts/'))}
+        return trees[ref]
+
+    def closure(ref, roots):
+        key = (ref, roots)
+        if key not in closures:
+            paths = tree(ref)
+            def read(path):
+                sha = paths[path]
+                if sha not in texts:
+                    texts[sha] = gh.text(SOURCE, path, ref)
+                return texts[sha]
+            closures[key] = dependency_paths(roots, paths, read)
+        return closures[key]
+
+    tree(target)
     def enrich(pins):
         for pin in pins:
             roots = tuple(pin.get('roots', []))
-            if roots not in closures:
-                def read(path):
-                    if path not in texts:
-                        texts[path] = gh.text(SOURCE, path, target)
-                    return texts[path]
-                closures[roots] = dependency_paths(roots, paths, read)
-            pin['dependency_paths'] = closures[roots]
+            refs = [target]
+            old = pin.get('sha') or ''
+            if re.fullmatch('[a-fA-F0-9]{40}', old) and old != target and any(roots):
+                refs.append(old)
+            declared = set()
+            for ref in refs:
+                try:
+                    declared.update(closure(ref, roots))
+                except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
+                    cause = str(error) if isinstance(error, Refused) else type(error).__name__
+                    raise Refused(f'source-dependencies-unreadable:{ref}:{cause}') from error
+            pin['dependency_paths'] = sorted(declared)
     return enrich
 
 

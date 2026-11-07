@@ -326,7 +326,7 @@ class TestGitTransportPureGuards(unittest.TestCase):
         call.assert_not_called()
 
     def test_main_rejects_alternate_effective_pushurl_before_any_push(self):
-        expected = "git@github.com:SylphxAI/example.git"
+        expected = "https://github.com/SylphxAI/example.git"
         for push_result in (_RunResult(stdout="git@github.com:Other/unapproved.git\n"),
                             _RunResult(stdout=expected + "\n" + expected + "\n"),
                             _RunResult(returncode=1)):
@@ -337,13 +337,14 @@ class TestGitTransportPureGuards(unittest.TestCase):
                     manifest.write_text(json.dumps({"repo": "SylphxAI/example"}))
                     env = {"SHARED_PINS_BRANCH": BRANCH, "SHARED_PINS_MANIFEST": str(manifest),
                            "SHARED_PINS_PUSH_CLAIM": str(claim)}
-                    calls = [_RunResult(stdout=expected + "\n"), push_result]
+                    calls = [_RunResult(stdout=str(Path.cwd()) + "\n"),
+                             _RunResult(stdout=expected + "\n"), push_result]
                     with mock.patch.dict(os.environ, env, clear=True):
                         with mock.patch.object(git_transport, "call", side_effect=calls) as call:
                             with self.assertRaisesRegex(ValueError, "push remote changed"):
                                 git_transport.main(["push", "origin", BRANCH])
-                    self.assertEqual(call.call_count, 2)
-                    self.assertEqual(call.call_args_list[1].args[0],
+                    self.assertEqual(call.call_count, 3)
+                    self.assertEqual(call.call_args_list[2].args[0],
                                      ["remote", "get-url", "--push", "--all", "origin"])
                     self.assertFalse(claim.exists())
 

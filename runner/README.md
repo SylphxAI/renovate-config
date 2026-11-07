@@ -20,16 +20,22 @@ is skipped even if the portfolio has not caught up.
   SHA256(casefold(repo)), big-endian, modulo five choose the weekday. Hourly
   checks on that day can catch up after capacity frees. All shared pins in that
   repo are one change, not one PR per action. A roll is eligible only after a
-  consumed action/workflow directory or its declared shared-script closure
-  changed since a current pin. Unrelated source churn never opens a PR.
+  consumed action/workflow directory or a reached script/helper directory tree
+  changed since a current pin. Precise import tracing may only add paths to
+  these coarse trees; unrelated action directories stay excluded.
   At most **15 roll PRs** may be open across the active roster before regular
-  admission pauses; the next eligible pass re-evaluates capacity.
+  admission pauses; the next eligible pass re-evaluates capacity. Every known
+  open roll counts even if consumer/source discovery later fails. If any
+  active consumer's open-PR inventory is unreadable, capacity is unknown and
+  no new regular or expedited roll opens.
 - Expedited: label a source PR **`shared-action-fix`** before or after its merge.
   A merged labelled PR qualifies only where its changed action/workflow path is
-  consumed and the old pin is proven behind its merge SHA. Only explicitly
-  referenced shared scripts and their declared import closure at either the
-  existing pin or target revision affect a caller;
-  unresolved consumption is unknown, not whole-source eligibility. Fix rolls
+  consumed and the old pin is proven behind its merge SHA. The consumed closure
+  includes the whole used action tree, every directory
+  reached by executable script/local-uses paths, and transitive shared-helper
+  trees, including package-relative imports and package initializers, at both
+  the existing pin and target revision. Unresolvable consumption is unknown,
+  never known-empty or blanket whole-source eligibility. Fix rolls
   bypass the weekday and open-PR cap. The full merge SHA is the idempotency key.
   The latest missing qualifying fix in a pass groups the pending fixes.
 - Read-only lag report: hourly at minute 17, alert for a missing marked fix after
@@ -71,7 +77,12 @@ authentication passes the HTTPS rewrite in the child environment, never argv or
 stored `.git/config`. `git_transport.py` is the sole Git executable in that
 child's path. It translates Renovate's new-ref force-with-lease request into a
 **plain push only after proving that exact branch absent**; existing refs and
-all other remote writes refuse. A durable attempt marker precedes the call;
+all other remote writes refuse. Every proof, absence probe and push uses one
+resolved repository and one validated environment. Caller-supplied Git context
+options and environment overrides refuse, except the literal native quotePath
+prefix, exact same-host authentication shape and fixed LFS/prompt/SSH/strict-
+option values. The effective push URL is checked immediately before push.
+A durable attempt marker precedes the call;
 unknown outcomes are reconciled, never blindly replayed. The desk pre-push
 scanner hook stays enabled (`gitNoVerify: []`).
 

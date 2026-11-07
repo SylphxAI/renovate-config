@@ -134,15 +134,17 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
                SHARED_PINS_INSTALL_HOOK='1', SHARED_PINS_READ_ONLY='1' if dry_run else '0')
     env['PATH'] = str(bindir) + ':' + str(binary[0].parent) + ':' + os.environ['PATH']
     # Renovate's SSH remotes carry no credential. Its supported host-rule Git
-    # adapter supplies HTTPS authentication in child environment variables only.
+    # adapter supplies authentication in child environment variables only. The
+    # transport canonicalizes credential-free GitHub SSH arguments to HTTPS.
     env['RENOVATE_HOST_RULES'] = json.dumps([{'hostType': 'github', 'matchHost': 'github.com', 'token': gh._token}])
     # Initial ls-remote is unauthenticated in the native Git layer even with a
     # host rule. Apply the same supported Git environment-only rewrite to every
-    # child operation; the secret is never serialized in config.json.
+    # child operation; the secret is never serialized in config.json. The
+    # transport accepts only this canonical rule or the native same-host trio.
     env['RENOVATE_CUSTOM_ENV_VARIABLES'] = json.dumps({**config['customEnvVariables'],
         'GIT_CONFIG_COUNT': '1',
         'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{gh._token}@github.com/.insteadOf',
-        'GIT_CONFIG_VALUE_0': 'git@github.com:'})
+        'GIT_CONFIG_VALUE_0': 'https://github.com/'})
     if dry_run:
         env['RENOVATE_DRY_RUN'] = 'full'
     try:
@@ -220,9 +222,10 @@ def changes_since_pin(gh, pins, head, fix_rows):
         aggregate = [p['filename'] for p in comparison.get('files', [])]
         if len(aggregate) >= 300:
             unknown.append({'sha': old, 'reason': 'comparison-files-incomplete'})
-        else:
-            changes.append({'sha': head, 'merged_at': utcnow().isoformat(), 'files': aggregate,
-                            'behind_pins': [old], 'comparison_pin': old, 'lag_eligible': False})
+        # A capped response still proves every returned path changed. Omitted
+        # paths cannot cancel positive evidence or establish a healthy pin.
+        changes.append({'sha': head, 'merged_at': utcnow().isoformat(), 'files': aggregate,
+                        'behind_pins': [old], 'comparison_pin': old, 'lag_eligible': False})
         for fix in fix_rows:
             if old != fix['sha'] and gh.forward(old, fix['sha']):
                 fix.setdefault('behind_pins', []).append(old)
@@ -270,8 +273,7 @@ def source_reader(gh, target):
             value = gh.request(f'repos/{SOURCE}/git/trees/{ref}?recursive=1')
             if value.get('truncated'):
                 raise Refused('source-tree-truncated')
-            trees[ref] = {e['path']: e['sha'] for e in value['tree'] if e['type'] == 'blob' and
-                          e['path'].startswith(('.github/actions/', '.github/workflows/', 'scripts/'))}
+            trees[ref] = {e['path']: e['sha'] for e in value['tree'] if e['type'] == 'blob'}
         return trees[ref]
 
     def closure(ref, roots):
@@ -401,28 +403,39 @@ def main(argv=None):
             blob_cache, binary = {}, None
             source_rows = {r['repo']: r for r in rows}
             discovered = []
+            open_rolls, inventory_known = 0, True
             for repo in roster:
+                inventory_read = False
                 try:
                     if args.inventory:
                         if repo not in source_rows:
                             raise Refused('repository-not-in-fixture')
                         row = dict(source_rows[repo])
-                        if 'error' in row or not isinstance(row.get('files'), dict):
-                            raise Refused('repository-inventory-unreadable')
-                        row['files'] = {p if p.startswith('.github/') else '.github/workflows/' + p: t
-                                        for p, t in row['files'].items()}
                     else:
                         meta = gh.request(f'repos/{repo}')
                         if meta.get('archived'):
                             report['repositories'].append({'repo': repo, 'skip': 'archived'})
                             continue
-                        head = gh.request(f'repos/{repo}/commits/{meta["default_branch"]}')['sha']
-                        row = {'repo': repo, 'head': head, 'files': collect_files(gh, repo, head, blob_cache),
-                               'prs': gh.pages(f'repos/{repo}/pulls?state=open'),
-                               'branches': gh.request(f'repos/{repo}/git/matching-refs/heads/renovate/shared-ci-')}
+                        row = {'repo': repo, 'prs': gh.pages(f'repos/{repo}/pulls?state=open')}
                     if row.get('archived'):
                         report['repositories'].append({'repo': repo, 'skip': 'archived'})
                         continue
+                    # Fleet capacity is an independent observation. Preserve it
+                    # even if later consumer/source discovery refuses this row.
+                    prs = row.get('prs')
+                    if not isinstance(prs, list) or any(not isinstance(pr, dict) for pr in prs):
+                        raise Refused('open-roll-inventory-unreadable')
+                    open_rolls += sum(1 for pr in prs if pr.get('headRefName', pr.get('head', {}).get('ref', '')).startswith('renovate/shared-ci-'))
+                    inventory_read = True
+                    if args.inventory:
+                        if 'error' in row or not isinstance(row.get('files'), dict):
+                            raise Refused('repository-inventory-unreadable')
+                        row['files'] = {p if p.startswith('.github/') else '.github/workflows/' + p: t
+                                        for p, t in row['files'].items()}
+                    else:
+                        head = gh.request(f'repos/{repo}/commits/{meta["default_branch"]}')['sha']
+                        row.update(head=head, files=collect_files(gh, repo, head, blob_cache),
+                                   branches=gh.request(f'repos/{repo}/git/matching-refs/heads/renovate/shared-ci-'))
                     row['pins'] = parse_pins(row['files'])
                     if enrich:
                         enrich(row['pins'])
@@ -432,11 +445,12 @@ def main(argv=None):
                     discovered.append(row)
                 except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
                     cause = str(error) if isinstance(error, Refused) else type(error).__name__
+                    if not inventory_read:
+                        inventory_known = False
+                        report['alerts'].append({'repo': repo, 'reason': 'open-roll-inventory-unknown'})
                     report['alerts'].append({'repo': repo, 'reason': cause})
                     report['repositories'].append({'repo': repo, 'error': cause})
-            open_rolls = sum(1 for row in discovered for pr in row.get('prs', [])
-                             if pr.get('headRefName', pr.get('head', {}).get('ref', '')).startswith('renovate/shared-ci-'))
-            report.update(open_roll_prs=open_rolls, regular_open_cap=15)
+            report.update(open_roll_prs=open_rolls, open_roll_inventory_known=inventory_known, regular_open_cap=15)
             for row in discovered:
                 repo = row['repo']
                 try:
@@ -446,6 +460,8 @@ def main(argv=None):
                     decision = plan_repo(repo, row['files'], target, fix_rows, changes, now, existing,
                                          regular=regular_due(now), pins=row['pins'])
                     admit_regular(decision, open_rolls)
+                    if not inventory_known:
+                        decision.update(should_open=False, admission='open-roll-inventory-unknown')
                     if decision.get('should_open'):
                         open_rolls += 1
                     decision['unknown_source_history'] = unknown

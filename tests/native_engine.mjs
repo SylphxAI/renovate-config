@@ -107,7 +107,7 @@ test('synthetic credential stays out of native Git argv and persistent remote co
   const secret = 'synthetic-shared-ci-credential-not-a-real-token';
   const { getGitAuthenticatedEnvironmentVariables } = await mod('util/git/auth.js');
   const url = 'git@github.com:SylphxAI/renovate-config.git';
-  const env = getGitAuthenticatedEnvironmentVariables({}, url, { hostType: 'github', token: secret, matchHost: 'github.com' });
+  const env = getGitAuthenticatedEnvironmentVariables({}, 'https://github.com/', { hostType: 'github', token: secret, matchHost: 'github.com' });
   assert.ok(JSON.stringify(env).includes(secret), 'credential is confined to environment');
   assert.ok(!JSON.stringify(['clone', url, '.']).includes(secret));
   assert.ok(Object.entries(env).some(([k, v]) => k.startsWith('GIT_CONFIG_KEY_') && v.includes(secret)));
@@ -115,7 +115,25 @@ test('synthetic credential stays out of native Git argv and persistent remote co
   try {
     git(work, 'init'); git(work, 'remote', 'add', 'origin', url);
     const r = spawnSync(adapter, ['remote', '-v'], { cwd: work, env: { ...process.env, ...env }, encoding: 'utf8' });
-    assert.equal(r.status, 0); assert.ok(!r.stdout.includes(secret)); assert.ok(!r.stderr.includes(secret));
+    assert.equal(r.status, 0, r.stderr); assert.ok(!r.stdout.includes(secret)); assert.ok(!r.stderr.includes(secret));
+    const tracePath = path.join(work, 'native-auth-trace.jsonl');
+    setCustomEnv({ ...env, GIT_LFS_SKIP_SMUDGE: '1', GIT_TERMINAL_PROMPT: '0', SHARED_PINS_TEST_TRACE: tracePath });
+    const native = createSimpleGit({ config: { baseDir: work, binary: adapter } });
+    const inspected = await native.raw('remote', '-v');
+    assert.ok(!inspected.includes(secret));
+    const trace = readFileSync(tracePath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.deepEqual(trace[0].slice(0, 4), ['adapter', '-c', 'core.quotePath=false', 'remote']);
+    assert.deepEqual(trace[1].slice(0, 3), ['/usr/bin/git', '-C', work]);
+    assert.ok(!JSON.stringify(trace).includes(secret));
+    const python = `import json,os,sys;sys.path.insert(0,sys.argv[1]);from git_transport import git_environment;print(json.dumps({k:v for k,v in git_environment().items() if k.startswith('GIT_CONFIG_')}))`;
+    for (const initial of [{}, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: 'https://github.com/' }]) {
+      const nativeEnv = getGitAuthenticatedEnvironmentVariables(initial, 'https://github.com/', { hostType: 'github', token: secret, matchHost: 'github.com' });
+      const canonical = JSON.parse(execFileSync('python3', ['-c', python, path.join(root, 'runner')], { env: { ...process.env, ...nativeEnv }, encoding: 'utf8' }));
+      assert.deepEqual(canonical, { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: env.GIT_CONFIG_KEY_0, GIT_CONFIG_VALUE_0: 'https://github.com/' });
+    }
+    const repoScoped = getGitAuthenticatedEnvironmentVariables({}, url, { hostType: 'github', token: secret, matchHost: 'github.com' });
+    const refused = spawnSync(adapter, ['remote', '-v'], { cwd: work, env: { ...process.env, ...repoScoped }, encoding: 'utf8' });
+    assert.notEqual(refused.status, 0); assert.match(refused.stderr, /unsafe or uncertain/);
     assert.ok(!readFileSync(path.join(work, '.git/config'), 'utf8').includes(secret));
   } finally { rmSync(work, { recursive: true, force: true }); }
 });

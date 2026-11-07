@@ -69,20 +69,62 @@ def clone_args(args: list[str]) -> list[str]:
     return [args[0], '--depth=1', '--filter=blob:none', '--no-checkout', *selected]
 
 
-def call(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess:
-    env = dict(os.environ, GIT_LFS_SKIP_SMUDGE='1')
-    # Local remote inspection must describe the stored credential-free URL,
-    # not Git's environment-only authenticated rewrite.
-    if 'remote' in args:
-        for key in list(env):
-            if key == 'GIT_CONFIG_COUNT' or key.startswith(('GIT_CONFIG_KEY_', 'GIT_CONFIG_VALUE_')):
-                env.pop(key, None)
+def git_environment():
+    """Accept only the native same-host auth shape; bind one effective env."""
+    fixed = {'GIT_LFS_SKIP_SMUDGE': '1', 'GIT_TERMINAL_PROMPT': '0',
+             'GIT_SSH_COMMAND': 'ssh -o BatchMode=yes',
+             'GIT_TEST_DISALLOW_ABBREVIATED_OPTIONS': 'true'}
+    inherited = {k: v for k, v in os.environ.items() if k.startswith('GIT_')}
+    count = inherited.get('GIT_CONFIG_COUNT')
+    auth = {}
+    if count is not None:
+        # One canonical rewrite, the native auth helper's exact trio, or our
+        # initial canonical rewrite followed by that same native trio.
+        shapes = {'1': ['https://github.com/'],
+                  '3': ['ssh://git@github.com/', 'git@github.com:', 'https://github.com/'],
+                  '4': ['https://github.com/', 'ssh://git@github.com/',
+                        'git@github.com:', 'https://github.com/']}
+        if count not in shapes:
+            raise ValueError('unapproved Git auth count')
+        keys = [inherited.get(f'GIT_CONFIG_KEY_{i}', '') for i in range(int(count))]
+        values = [inherited.get(f'GIT_CONFIG_VALUE_{i}') for i in range(int(count))]
+        if (len(set(keys)) != 1 or not re.fullmatch(
+                r'url\.https://x-access-token:[A-Za-z0-9_%.-]+@github\.com/\.insteadOf', keys[0])
+                or values != shapes[count]):
+            raise ValueError('unapproved Git auth rewrite')
+        auth = {'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': keys[0],
+                'GIT_CONFIG_VALUE_0': 'https://github.com/'}
+        accepted = {'GIT_CONFIG_COUNT', *(f'GIT_CONFIG_{kind}_{i}'
+                    for i in range(int(count)) for kind in ('KEY', 'VALUE'))}
+    else:
+        accepted = set()
+    for key, value in inherited.items():
+        if key not in accepted and (key not in fixed or value != fixed[key]):
+            raise ValueError('unapproved Git environment override')
+    return {**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, **fixed, **auth}
+
+
+def github_url(value):
+    """Keep native SSH argv credential-free, but use HTTPS for real Git."""
+    for prefix in ('git@github.com:', 'ssh://git@github.com/'):
+        if value.startswith(prefix):
+            path = value[len(prefix):]
+            if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', path):
+                raise ValueError('unapproved GitHub SSH target')
+            return 'https://github.com/' + path
+    return value
+
+
+def call(args: list[str], *, directory: Path, env: dict, capture: bool = False) -> subprocess.CompletedProcess:
+    # The directory and validated environment are supplied once by main and
+    # reused for proof, effective-target inspection, absence probe and push.
+    argv = [REAL_GIT, '-C', str(directory), *(github_url(a) for a in args)]
     trace = os.environ.get('SHARED_PINS_TEST_TRACE')
     if trace:
         import json
         with open(trace, 'a') as output:
-            output.write(json.dumps([REAL_GIT, *args]) + '\n')
-    result = subprocess.run([REAL_GIT, *args], capture_output=True, text=True, env=env, check=False)
+            output.write(json.dumps(argv) + '\n')
+    result = subprocess.run(argv, capture_output=True, text=True, env=env, check=False)
     # Git may echo the authenticated environment rewrite in network errors.
     # Strip URL userinfo before returning anything to the engine/logger.
     result.stdout = re.sub(r'(https?://)[^/\s@]+@', r'\1', result.stdout)
@@ -98,19 +140,21 @@ def main(args: list[str]) -> int:
         import json
         with open(os.environ['SHARED_PINS_TEST_TRACE'], 'a') as output:
             output.write(json.dumps(['adapter', *args]) + '\n')
+    # The native library hard-codes this one presentation setting. Consume it
+    # literally, never forward any caller-supplied global option to real Git.
+    if args[:2] == ['-c', 'core.quotePath=false']:
+        args = args[2:]
     if not args:
-        return call(args).returncode
-    # simple-git puts -c key=value before the subcommand. Do not search
-    # arbitrary values for command names or admit alternate remote writers.
+        raise ValueError('missing Git subcommand')
+    command = args[0]
     index = 0
-    while index < len(args) and args[index] in ('-c', '-C'):
-        if index + 1 >= len(args):
-            raise ValueError('missing git config')
-        key = args[index + 1].split('=', 1)[0]
-        if args[index] == '-c' and key not in ('core.quotePath',):
-            raise ValueError('unapproved command config')
-        index += 2
-    command = args[index] if index < len(args) else ''
+    if any(re.match(r'^-(?:c|C)(?:.|$)|^--(?:git-dir|work-tree|exec-path|config-env|namespace|super-prefix)(?:=|$)', a)
+           for a in args):
+        raise ValueError('Git context/configuration override refused')
+    env = git_environment()
+    directory = Path.cwd().resolve()
+    def run(values, *, capture=False):
+        return call(values, directory=directory, env=env, capture=capture)
     allowed = {'version', '--version', 'rev-parse', 'status', 'config', 'remote', 'init',
                'fetch', 'checkout', 'reset', 'clean', 'branch', 'log', 'show', 'show-ref',
                'ls-files', 'ls-tree', 'ls-remote', 'diff', 'diff-tree', 'cat-file',
@@ -142,14 +186,15 @@ def main(args: list[str]) -> int:
             raise ValueError('remote mutation refused')
     if command == 'clone':
         index = args.index('clone')
-        result = call(args[:index] + clone_args(args[index:]))
+        result = run(clone_args(args))
         if result.returncode:
             return result.returncode
         # Last argument is Renovate's target directory. Non-cone patterns do
         # not hydrate unrelated root files or LFS assets.
         target = args[-1]
-        result = call(['-C', target, 'sparse-checkout', 'set', '--no-cone',
-                       '/.github/', '/renovate.json', '/renovate.json5', '/.renovaterc', '/.renovaterc.json'])
+        result = call(['sparse-checkout', 'set', '--no-cone',
+                       '/.github/', '/renovate.json', '/renovate.json5', '/.renovaterc', '/.renovaterc.json'],
+                      directory=(directory / target).resolve(), env=env)
         if result.returncode:
             return result.returncode
         if os.environ.get('SHARED_PINS_INSTALL_HOOK') == '1':
@@ -161,29 +206,33 @@ def main(args: list[str]) -> int:
         cleaned = push_args(args[index + 1:], branch)
         if os.environ.get('SHARED_PINS_READ_ONLY') == '1':
             raise ValueError('dry run cannot push')
+        resolved = run(['rev-parse', '--show-toplevel'], capture=True)
+        if resolved.returncode or not Path(resolved.stdout.strip()).is_dir():
+            raise ValueError('unresolved consumer repository')
+        directory = Path(resolved.stdout.strip()).resolve()
         manifest = os.environ.get('SHARED_PINS_MANIFEST')
         if manifest:
             import json
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             from pin_proof import prove_files
             proof = json.loads(Path(manifest).read_text())
-            remote = call(['remote', 'get-url', 'origin'], capture=True)
-            push_remote = call(['remote', 'get-url', '--push', '--all', 'origin'], capture=True)
+            remote = run(['remote', 'get-url', 'origin'], capture=True)
+            push_remote = run(['remote', 'get-url', '--push', '--all', 'origin'], capture=True)
             repo = proof['repo']
-            if remote.returncode or remote.stdout.strip() not in (
-                    f'git@github.com:{repo}.git', f'https://github.com/{repo}.git'):
+            expected = {f'https://github.com/{repo}', f'https://github.com/{repo}.git'}
+            if remote.returncode or remote.stdout.strip() not in expected:
                 raise ValueError('selected consumer remote changed')
             if push_remote.returncode or push_remote.stdout.strip() != remote.stdout.strip():
                 raise ValueError('selected consumer push remote changed')
-            parent = call(['rev-parse', f'{branch}^'], capture=True)
+            parent = run(['rev-parse', f'{branch}^'], capture=True)
             if parent.returncode or parent.stdout.strip() != proof['base_head']:
                 raise ValueError('consumer base changed')
-            changed = call(['diff', '--name-only', f'{branch}^', branch], capture=True)
+            changed = run(['diff', '--name-only', f'{branch}^', branch], capture=True)
             if changed.returncode or any(p not in proof['files'] for p in changed.stdout.splitlines()):
                 raise ValueError('unapproved changed path')
             after = {}
             for path, text in proof['files'].items():
-                value = call(['show', f'{branch}:{path}'], capture=True)
+                value = run(['show', f'{branch}:{path}'], capture=True)
                 if value.returncode:
                     raise ValueError('unreadable candidate')
                 after[path] = value.stdout
@@ -196,16 +245,20 @@ def main(args: list[str]) -> int:
         marker = Path(os.environ['SHARED_PINS_PUSH_CLAIM'])
         with marker.open('x') as out:
             out.write(branch + '\n')
-        result = call(args[:index] + ['ls-remote', '--exit-code', '--heads', 'origin', f'refs/heads/{branch}'], capture=True)
+        result = run(['ls-remote', '--exit-code', '--heads', 'origin', f'refs/heads/{branch}'], capture=True)
         if result.returncode != 2 or result.stdout.strip():
             raise ValueError('remote branch exists or absence is unproved; refusing mutation')
-        return call(args[:index] + ['push', *cleaned]).returncode
+        if manifest:
+            effective = run(['remote', 'get-url', '--push', '--all', 'origin'], capture=True)
+            if effective.returncode or effective.stdout.strip() not in expected:
+                raise ValueError('effective consumer push target changed')
+        return run(['push', *cleaned]).returncode
     if '--no-verify' in args:
         raise ValueError('verification bypass refused')
     # Fetch/rebase of an existing roll is not part of this writer's contract.
     if '--force' in args or any(a.startswith('--force-with-lease') for a in args):
         raise ValueError('force option refused')
-    return call(args).returncode
+    return run(args).returncode
 
 
 if __name__ == '__main__':

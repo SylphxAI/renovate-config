@@ -2,6 +2,9 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 from pathlib import Path
 import re
+import os
+import subprocess
+import sys
 
 import unittest
 from functools import wraps
@@ -21,6 +24,7 @@ parse_active_portfolio = pin_plan.parse_active_portfolio
 parse_pins = pin_plan.parse_pins
 plan_repo = pin_plan.plan_repo
 estimate_pr_ci_jobs = pin_plan.estimate_pr_ci_jobs
+regular_weekday = pin_plan.regular_weekday
 
 OLD = "a" * 40
 HEAD = "b" * 40
@@ -33,9 +37,9 @@ def workflow(root=".github/actions/review", ref=OLD):
     return f"on: [pull_request, merge_group]\njobs:\n  test:\n    runs-on: self-hosted\n    steps:\n      - uses: SylphxAI/.github/{root}@{ref} # main\n"
 
 
-def plan(*, files=None, fixes=None, changes=None, now=NOW, regular=False, branches=()):
+def plan(*, files=None, fixes=None, changes=None, now=NOW, regular=False, branches=(), pins=None):
     return plan_repo("SylphxAI/example", files or {PATH: workflow()}, HEAD,
-                     fixes or [], changes or [], now, list(branches), regular)
+                     fixes or [], changes or [], now, list(branches), regular, pins=pins)
 
 
 def change(*, sha=FIX, age=timedelta(hours=25), files=None, **kwargs):
@@ -196,9 +200,15 @@ def _test_affected_fix_key_and_existing_immutable_branch():
     assert report["branch_exists"] and not report["should_open"]
 
 
-def _test_unrelated_fix_does_not_qualify_and_shared_helpers_do():
+def _test_unrelated_fix_does_not_qualify_and_only_declared_helpers_do():
     assert not plan(fixes=[change(files=[".github/actions/unrelated/action.yml"], behind_pins=[OLD])])["qualifying_fixes"]
-    assert plan(fixes=[change(files=["scripts/common.py"], behind_pins=[OLD])])["qualifying_fixes"]
+    shared_change = change(files=["scripts/common.py"], behind_pins=[OLD])
+    report = plan(fixes=[shared_change])
+    assert not report["qualifying_fixes"]
+    assert report["findings"][0]["kind"] == "dependency_unknown"
+    pins = parse_pins({PATH: workflow()})
+    pins[0]["dependency_paths"] = ["scripts/common.py"]
+    assert plan(fixes=[shared_change], pins=pins)["qualifying_fixes"]
     assert not plan(fixes=[change(files=["docs/readme.md"], behind_pins=[OLD])])["qualifying_fixes"]
 
 
@@ -290,6 +300,99 @@ def _test_aware_timestamps_required_and_inputs_are_not_modified():
     before = repr(record)
     plan(fixes=[record])
     assert repr(record) == before
+
+
+def _test_regular_requires_relevant_proven_changes_not_source_head_churn():
+    monday = datetime(2026, 11, 9, 4, 17, tzinfo=timezone.utc)
+    assert regular_weekday("SylphxAI/example") == 0
+    assert not plan(now=monday, regular=True)["should_open"]
+    for paths in ([".github/actions/unrelated/action.yml"], ["scripts/unrelated.py"], ["docs/readme.md"]):
+        report = plan(now=monday, regular=True, changes=[change(files=paths, behind_pins=[OLD])])
+        assert not report["should_open"], paths
+        assert not report["relevant_changes"], paths
+    assert not plan(now=monday, regular=True, changes=[change()])["should_open"]
+    report = plan(now=monday, regular=True, changes=[change(behind_pins=[OLD])])
+    assert report["regular_due"] and report["regular_eligible"]
+    assert report["should_open"]
+    assert report["branch_key"] == "week-2026-46"
+
+
+def _test_regular_declared_dependency_closure_and_missing_graph():
+    monday = datetime(2026, 11, 9, 4, 17, tzinfo=timezone.utc)
+    pins = parse_pins({PATH: workflow()})
+    pins[0]["dependency_paths"] = ["scripts/declared.py", "scripts/nested-helper.py"]
+    relevant = change(files=["scripts/nested-helper.py"], behind_pins=[OLD])
+    assert plan(now=monday, regular=True, changes=[relevant], pins=pins)["should_open"]
+    unrelated = change(files=["scripts/not-used.py"], behind_pins=[OLD])
+    report = plan(now=monday, regular=True, changes=[unrelated], pins=pins)
+    assert not report["should_open"]
+    assert not report["findings"]  # Explicit closure is known, even if empty.
+    pins[0]["dependency_paths"] = []
+    report = plan(now=monday, regular=True, changes=[relevant], pins=pins)
+    assert not report["should_open"] and not report["findings"]
+    report = plan(now=monday, regular=True, changes=[relevant])
+    assert not report["should_open"]
+    assert report["findings"][0]["kind"] == "dependency_unknown"
+
+
+def _test_regular_slot_and_weekend_do_not_throttle_marked_fixes():
+    relevant = change(behind_pins=[OLD])
+    tuesday = datetime(2026, 11, 10, 4, 17, tzinfo=timezone.utc)
+    for date in (NOW, tuesday):
+        report = plan(now=date, regular=True, changes=[relevant])
+        assert not report["regular_due"]
+        assert not report["should_open"]
+        report = plan(now=date, regular=True, fixes=[relevant])
+        assert report["should_open"]
+        assert report["reason"] == "marked_fix"
+
+
+def _test_regular_weekday_is_stable_across_process_hash_seeds_and_case():
+    assert regular_weekday("SylphxAI/cloud") == 2
+    assert regular_weekday("sylphxai/CLOUD") == 2
+    script = "from runner.pin_plan import regular_weekday; print(regular_weekday('SylphxAI/cloud'))"
+    for seed in ("1", "12345"):
+        result = subprocess.check_output([sys.executable, "-c", script],
+                                         env={**os.environ, "PYTHONHASHSEED": seed},
+                                         cwd=Path(__file__).parents[1], text=True)
+        assert result.strip() == "2"
+
+
+def _test_aggregate_regular_evidence_does_not_invent_lag_age():
+    monday = datetime(2026, 11, 9, 4, 17, tzinfo=timezone.utc)
+    record = change(age=timedelta(days=30), behind_pins=[OLD], lag_eligible=False)
+    report = plan(now=monday, regular=True, changes=[record])
+    assert report["should_open"]
+    assert len(report["relevant_changes"]) == 1
+    assert not report["lag_alerts"]
+
+
+def _test_aggregate_records_same_target_preserve_per_pin_file_association():
+    monday = datetime(2026, 11, 9, 4, 17, tzinfo=timezone.utc)
+    other = "d" * 40
+    text = workflow() + f"      - uses: SylphxAI/.github/.github/actions/other@{other}\n"
+    records = [change(sha=HEAD, files=["docs/readme.md"], behind_pins=[OLD], lag_eligible=False),
+               change(sha=HEAD, files=[".github/actions/review/action.yml"], behind_pins=[other], lag_eligible=False)]
+    report = plan(now=monday, regular=True, changes=records, files={PATH: text})
+    assert not report["should_open"]  # Neither old pin changed its own consumed root.
+    assert not report["relevant_changes"]
+    records[0]["files"] = [".github/actions/review/action.yml"]
+    report = plan(now=monday, regular=True, changes=records, files={PATH: text})
+    assert report["should_open"]
+    assert len(report["relevant_changes"]) == 1
+    assert report["relevant_changes"][0]["behind_pins"] == [OLD]
+
+
+def _test_opaque_checkout_consumption_is_not_broadly_eligible():
+    monday = datetime(2026, 11, 9, 4, 17, tzinfo=timezone.utc)
+    text = f"steps:\n- uses: actions/checkout@v4\n  with: {{repository: SylphxAI/.github, ref: {OLD}, path: shared}}\n"
+    record = change(behind_pins=[OLD])
+    report = plan(now=monday, regular=True, files={PATH: text}, changes=[record])
+    assert not report["should_open"]
+    assert report["findings"][0]["kind"] == "consumption_unknown"
+    pins = parse_pins({PATH: text})
+    pins[0]["dependency_paths"] = [".github/actions/review"]
+    assert plan(now=monday, regular=True, files={PATH: text}, changes=[record], pins=pins)["should_open"]
 
 
 class TestPinPlan(unittest.TestCase):

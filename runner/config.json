@@ -20,7 +20,7 @@
   "rebaseWhen": "never",
   "repositoryCache": "disabled",
   "persistRepoData": false,
-  "prConcurrentLimit": 1,
+  "prConcurrentLimit": 0,
   "prHourlyLimit": 1,
   "minimumReleaseAge": "0 days",
   "schedule": [],
@@ -34,5 +34,6 @@
   "prFooter": "",
   "branchPrefix": "renovate/",
   "branchTopic": "shared-ci-week-2000-01",
-  "gitTimeout": 120000
+  "gitTimeout": 120000,
+  "exitCodeForErrors": true
 }

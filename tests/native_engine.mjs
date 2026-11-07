@@ -44,6 +44,27 @@ test('locked native regex manager extracts and replaces uses and checkout ref, i
   rmSync(fixture, { recursive: true, force: true });
 });
 
+test('generated production managers parse and update both field orders without a second SHA editor', async () => {
+  const content = `jobs:\n  a:\n    steps:\n      - uses: SylphxAI/.github/.github/actions/pr-review@${oldSha} # main\n      - uses: actions/checkout@v4\n        with:\n          ref: '${oldSha}' # main\n          repository: SylphxAI/.github\n          path: review-shared\n`;
+  const script = `import json,sys;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from shared_pins import engine_config;from pin_plan import parse_pins;x=json.load(sys.stdin);print(json.dumps(engine_config('SylphxAI/fixture',parse_pins(x),'week-2026-46',Path('/tmp/fixture'))))`;
+  const config = JSON.parse(execFileSync('python3', ['-c', script, path.join(root, 'runner')], { input: JSON.stringify({ '.github/workflows/a.yml': content }), encoding: 'utf8' }));
+  assert.deepEqual((await validateConfig('global', config)).errors, []);
+  const fixture = mkdtempSync(path.join(tmpdir(), 'pin-generated-'));
+  GlobalConfig.set({ localDir: fixture });
+  try {
+    let result = content;
+    for (const manager of config.customManagers) {
+      const extracted = extractPackageFile(result, '.github/workflows/a.yml', manager);
+      assert.ok(extracted);
+      assert.equal(extracted.deps.length, 2);
+      for (const [depIndex, dep] of extracted.deps.entries()) {
+        result = await doAutoReplace({ ...manager, ...dep, manager: 'regex', packageFile: '.github/workflows/a.yml', depIndex, newDigest: newSha, newValue: 'main' }, result, false);
+      }
+    }
+    assert.equal(result, content.replaceAll(oldSha, newSha));
+  } finally { rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('production native configuration parses without invalid options', async () => {
   const config = JSON.parse(readFileSync(path.join(root, 'runner/config.json')));
   const result = await validateConfig('global', config);

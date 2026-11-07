@@ -102,6 +102,19 @@ class GitHub:
         # low. Never switch identities or lower the shared floor.
         return min(limits['core']['remaining'], limits['graphql']['remaining'])
 
+    def queue_state(self, repo: str, number: int):
+        owner, name = repo.split('/')
+        query = """query($owner:String!,$name:String!,$number:Int!){
+          repository(owner:$owner,name:$name){pullRequest(number:$number){
+            headRefOid state isInMergeQueue autoMergeRequest{enabledAt mergeMethod}
+          }}}
+        """
+        value = self.request('graphql', method='POST', body={'query': query,
+            'variables': {'owner': owner, 'name': name, 'number': number}})
+        if value.get('errors'):
+            raise Refused('arm-readback-unavailable')
+        return value['data']['repository']['pullRequest']
+
     def arm(self, repo: str, number: int, head: str):
         result = subprocess.run(['gh', 'pr', 'merge', '-R', repo, str(number), '--auto', '--squash',
                                  '--match-head-commit', head], env=self.env, capture_output=True,

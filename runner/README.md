@@ -15,12 +15,21 @@ retired, archived and delivered entries are excluded. Foundation support repos
 belong in that same file, not in a code exception list. An archived GitHub repo
 is skipped even if the portfolio has not caught up.
 
-- Regular: Monday **04:17 UTC**, one grouped immutable PR per consumer per ISO
-  week. All shared pins in that repo are one change, not one PR per action.
+- Regular: one stable assigned weekday Monday–Friday, beginning **04:17 UTC**,
+  one grouped immutable PR per consumer per ISO week. The first eight bytes of
+  SHA256(casefold(repo)), big-endian, modulo five choose the weekday. Hourly
+  checks on that day can catch up after capacity frees. All shared pins in that
+  repo are one change, not one PR per action. A roll is eligible only after a
+  consumed action/workflow directory or its declared shared-script closure
+  changed since a current pin. Unrelated source churn never opens a PR.
+  At most **15 roll PRs** may be open across the active roster before regular
+  admission pauses; the next eligible pass re-evaluates capacity.
 - Expedited: label a source PR **`shared-action-fix`** before or after its merge.
   A merged labelled PR qualifies only where its changed action/workflow path is
-  consumed and the old pin is proven behind its merge SHA. `scripts/` helpers
-  conservatively affect every caller. The full merge SHA is the idempotency key.
+  consumed and the old pin is proven behind its merge SHA. Only explicitly
+  referenced shared scripts and their declared import closure affect a caller;
+  unresolved consumption is unknown, not whole-source eligibility. Fix rolls
+  bypass the weekday and open-PR cap. The full merge SHA is the idempotency key.
   The latest missing qualifying fix in a pass groups the pending fixes.
 - Read-only lag report: hourly at minute 17, alert for a missing marked fix after
   **more than 24 hours**, or an ordinary consumed change after **more than
@@ -31,7 +40,9 @@ Branches are `renovate/shared-ci-week-YYYY-NN` or
 `renovate/shared-ci-fix-<40-character merge SHA>`. Existing keys are never
 rebased, force-pushed, recreated or retargeted. A blocked immutable PR requires
 operator review; its continued lag stays visible. No emergency or older pin PR
-is edited or closed. No per-day regular bursts occur between weekly passes.
+is edited or closed. An unreadable repository is excluded from writes and reported unknown, never green.
+A non-ancestor pin can be proposed but cannot auto-arm; its PR body names the
+ancestry failure and the report retains it for operator review.
 The report includes per-repo static PR job expansion (finite matrices and local
 reusable workflows); dynamic or external reusable expansion is explicitly
 unknown. These are job estimates, not executed jobs or runner minutes.
@@ -39,7 +50,8 @@ unknown. These are job estimates, not executed jobs or runner minutes.
 ## Identity, credentials and publication
 
 The service inherits the desk's existing connected `gh` delegation. The runner
-captures `gh auth token` only in process memory; each pass verifies `/user` is
+uses the installed unwrapped CLI for the local `gh auth token` read only,
+then uses the metered wrapper for every API/merge call. It captures the token only in process memory; each pass verifies `/user` is
 User **shtse8** with **repo + workflow** OAuth scopes, failing closed with no App
 fallback. There is no new repository, Actions environment or on-disk token.
 This uses owner `company/github-apps.md`'s connected-user mode (installation
@@ -78,7 +90,7 @@ all dry runs are unarmed.
 
 ## Run and recover
 
-Prerequisites: desk `gh`, Git, npm, Python with PyYAML 6.0.3, and `desk-publish`
+Prerequisites: desk `gh`, Git, npm, Python with PyYAML 6.0 or newer (CI pins 6.0.3), and `desk-publish`
 for installing the existing pre-push hook. The GitOps service in
 `SylphxAI/infra` owns scheduling, locks, low CPU/IO priority, the 55-minute
 process-group deadline, 4 GiB sampled cache cap, cleanup and durable notification

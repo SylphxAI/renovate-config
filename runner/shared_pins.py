@@ -18,6 +18,7 @@ import tempfile
 from github_io import GitHub, Refused, save
 from pin_plan import parse_active_portfolio, parse_pins, plan_repo
 from pin_proof import prove_files
+from source_dependencies import dependency_paths, touches
 
 HERE = Path(__file__).resolve().parent
 SOURCE = 'SylphxAI/.github'
@@ -30,7 +31,7 @@ def utcnow():
 
 
 def regular_due(now):
-    return now.weekday() == 0 and now.hour == 4 and now.minute >= 17
+    return now.weekday() < 5 and (now.hour, now.minute) >= (4, 17)
 
 
 def private_directory(path):
@@ -56,8 +57,12 @@ def allocated(path):
     return size
 
 
-def engine_config(repo, pins, branch_key, root):
+def engine_config(repo, pins, branch_key, root, *, ancestry_failures=()):
     config = json.loads((HERE / 'config.json').read_text())
+    if ancestry_failures:
+        config['prBodyTemplate'] += ('\n\nAutomatic merge is withheld: source main is not a proven descendant of these existing pins: '
+                                     + ', '.join('`' + sha + '`' for sha in ancestry_failures)
+                                     + '. An ancestry review is required.')
     custom = []
     for path in sorted({p['path'] for p in pins if re.fullmatch('[a-fA-F0-9]{40}', (p.get('sha') or ''))}):
         matches = []
@@ -108,10 +113,10 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
     bindir = folder / 'bin'
     bindir.mkdir()
     (bindir / 'git').symlink_to(HERE / 'git_transport.py')
-    config = engine_config(repo, row['pins'], key, folder)
+    config = engine_config(repo, row['pins'], key, folder, ancestry_failures=row.get('ancestry_failures', []))
     config_path = folder / 'config.json'
     manifest_path = folder / 'manifest.json'
-    save(manifest_path, dict(base_head=row['head'], target=target, pins=[p for p in row['pins'] if p.get('sha')], files=row['files']))
+    save(manifest_path, dict(repo=repo, base_head=row['head'], target=target, pins=[p for p in row['pins'] if p.get('sha')], files=row['files']))
     claim = state / (hashlib.sha256((repo + ':' + key).encode()).hexdigest() + '.push-claim')
     config['customEnvVariables'] = {
         'GIT_LFS_SKIP_SMUDGE': '1', 'SHARED_PINS_BRANCH': branch,
@@ -120,7 +125,9 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
     save(config_path, config)
     if claim.exists():
         raise Refused('prior-push-attempt-needs-reconciliation')
-    env = dict(gh.env, RENOVATE_TOKEN=gh._token, RENOVATE_USERNAME=gh.login,
+    clean_env = {k: v for k, v in gh.env.items()
+                 if not k.startswith(('RENOVATE_', 'SHARED_PINS_', 'GIT_CONFIG_'))}
+    env = dict(clean_env, RENOVATE_TOKEN=gh._token, RENOVATE_USERNAME=gh.login,
                RENOVATE_CONFIG_FILE=str(config_path), LOG_LEVEL='info', LOG_FORMAT='json',
                GIT_LFS_SKIP_SMUDGE='1', SHARED_PINS_BRANCH=branch,
                SHARED_PINS_MANIFEST=str(manifest_path), SHARED_PINS_PUSH_CLAIM=str(claim),
@@ -129,6 +136,13 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
     # Renovate's SSH remotes carry no credential. Its supported host-rule Git
     # adapter supplies HTTPS authentication in child environment variables only.
     env['RENOVATE_HOST_RULES'] = json.dumps([{'hostType': 'github', 'matchHost': 'github.com', 'token': gh._token}])
+    # Initial ls-remote is unauthenticated in the native Git layer even with a
+    # host rule. Apply the same supported Git environment-only rewrite to every
+    # child operation; the secret is never serialized in config.json.
+    env['RENOVATE_CUSTOM_ENV_VARIABLES'] = json.dumps({**config['customEnvVariables'],
+        'GIT_CONFIG_COUNT': '1',
+        'GIT_CONFIG_KEY_0': f'url.https://x-access-token:{gh._token}@github.com/.insteadOf',
+        'GIT_CONFIG_VALUE_0': 'git@github.com:'})
     if dry_run:
         env['RENOVATE_DRY_RUN'] = 'full'
     try:
@@ -136,10 +150,23 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
                                 capture_output=True, timeout=1200)
         if gh._token.encode() in result.stdout or gh._token.encode() in result.stderr:
             raise Refused('engine-diagnostic-credential-refused')
-        if result.returncode:
-            raise Refused('native-engine-failed')
+        terminal = []
+        for line in result.stdout.splitlines():
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if item.get('msg') == 'Repository finished' and item.get('repository') == repo:
+                terminal.append(item)
+        if result.returncode or len(terminal) != 1 or terminal[0].get('result') != 'done':
+            # Finite provider result codes only; never persist arbitrary native
+            # error objects/configuration even on a nonzero process exit.
+            code = terminal[0].get('result', 'missing') if len(terminal) == 1 else 'missing'
+            code = code if isinstance(code, str) and re.fullmatch('[a-z-]{1,64}', code) else 'unknown'
+            raise Refused(f'native-engine-failed:{result.returncode}:{code}')
         # Never retain raw native logs: configuration can contain authentication.
-        return {'engine_exit': result.returncode, 'branch': branch}
+        return {'engine_exit': result.returncode, 'engine_result': 'done',
+                'engine_cloned': terminal[0].get('cloned') is True, 'branch': branch}
     finally:
         row['cache_peak_bytes'] = allocated(root)
         shutil.rmtree(folder)
@@ -177,11 +204,10 @@ def fixes(gh):
 
 
 def changes_since_pin(gh, pins, head, fix_rows):
-    """Read first relevant outstanding commits, with explicit incomplete findings.
+    """Positive consumed-path proof plus oldest outstanding relevant change.
 
-    The comparison's aggregate file list is capped by GitHub. A truncated graph
-    or file inventory is reported as unknown, never as no lag. Per-commit files
-    are read only until each consumed root has an oldest outstanding change.
+    Aggregate comparison proves regular relevance independently of the history
+    window. A capped history/file response remains unknown for lag purposes.
     """
     changes, unknown = [], []
     shas = sorted({p['sha'] for p in pins if re.fullmatch('[a-fA-F0-9]{40}', (p.get('sha') or '')) and p['sha'] != head})
@@ -190,12 +216,23 @@ def changes_since_pin(gh, pins, head, fix_rows):
         if not gh.forward(old, head):
             unknown.append({'sha': old, 'reason': 'pin-is-not-source-main-ancestor'})
             continue
+        selected = [p for p in pins if p.get('sha') == old]
+        aggregate = [p['filename'] for p in comparison.get('files', [])]
+        if len(aggregate) >= 300:
+            unknown.append({'sha': old, 'reason': 'comparison-files-incomplete'})
+        else:
+            changes.append({'sha': head, 'merged_at': utcnow().isoformat(), 'files': aggregate,
+                            'behind_pins': [old], 'comparison_pin': old, 'lag_eligible': False})
+        for fix in fix_rows:
+            if old != fix['sha'] and gh.forward(old, fix['sha']):
+                fix.setdefault('behind_pins', []).append(old)
+            elif gh.forward(fix['sha'], old):
+                fix.setdefault('included_by_pins', []).append(old)
         commits = comparison.get('commits', [])
         if comparison.get('total_commits', len(commits)) > len(commits):
             unknown.append({'sha': old, 'reason': 'source-history-incomplete'})
             continue
-        roots = {r for p in pins if p['sha'] == old for r in p.get('consumed_roots', p.get('roots', ['']))}
-        pending = set(roots or [''])
+        pending = list(selected)
         for commit in commits:
             if not pending:
                 break
@@ -206,19 +243,43 @@ def changes_since_pin(gh, pins, head, fix_rows):
             paths = [p['filename'] for p in detail.get('files', [])]
             if len(paths) >= 300:
                 unknown.append({'sha': old, 'reason': 'commit-files-incomplete'})
-            affected = {r for r in pending if not r or any(p.startswith(r.rstrip('/') + '/') or p == r or
-                        p.startswith(('scripts/', '.github/actions/')) and not r for p in paths)
-                        or any(p.startswith('scripts/') for p in paths)}
+            affected = [p for p in pending if touches(p, paths)]
             if affected:
                 changes.append({'sha': commit['sha'], 'merged_at': commit['commit']['committer']['date'],
-                                'files': paths, 'behind_pins': [old]})
-                pending -= affected
+                                'files': paths, 'behind_pins': [old], 'comparison_pin': old})
+                pending = [p for p in pending if p not in affected]
+    if any(p.get('sha') == head for p in pins):
         for fix in fix_rows:
-            if gh.forward(old, fix['sha']) and old != fix['sha']:
-                fix.setdefault('behind_pins', []).append(old)
-            elif gh.forward(fix['sha'], old):
-                fix.setdefault('included_by_pins', []).append(old)
+            if gh.forward(fix['sha'], head):
+                fix.setdefault('included_by_pins', []).append(head)
     return changes, unknown
+
+
+def source_reader(gh, target):
+    tree = gh.request(f'repos/{SOURCE}/git/trees/{target}?recursive=1')
+    if tree.get('truncated'):
+        raise Refused('source-tree-truncated')
+    paths = [e['path'] for e in tree['tree'] if e['type'] == 'blob' and
+             e['path'].startswith(('.github/actions/', '.github/workflows/', 'scripts/'))]
+    texts, closures = {}, {}
+    def enrich(pins):
+        for pin in pins:
+            roots = tuple(pin.get('roots', []))
+            if roots not in closures:
+                def read(path):
+                    if path not in texts:
+                        texts[path] = gh.text(SOURCE, path, target)
+                    return texts[path]
+                closures[roots] = dependency_paths(roots, paths, read)
+            pin['dependency_paths'] = closures[roots]
+    return enrich
+
+
+def admit_regular(decision, open_rolls, cap=15):
+    """Expedited fixes bypass the capacity cap; regular slots never do."""
+    if decision.get('should_open') and not decision.get('qualifying_fixes') and open_rolls >= cap:
+        decision.update(should_open=False, capacity_deferred=True)
+    return decision
 
 
 def verify_and_arm(gh, row, pr, roster, target, state):
@@ -254,10 +315,15 @@ def verify_and_arm(gh, row, pr, roster, target, state):
         receipt['arm_attempted'] = True
         save(path, receipt)
         gh.arm(repo, pr['number'], head)
-        observed = gh.request(f'repos/{repo}/pulls/{pr["number"]}')
-        # REST auto_merge can be null once queued; the normal gh command's
-        # result is retained separately from queue admission, not a merge claim.
-        receipt.update(armed=True, auto_merge=observed.get('auto_merge'), state=observed['state'])
+        observed = gh.queue_state(repo, pr['number'])
+        admitted = (observed.get('headRefOid') == head and
+                    (observed.get('state') == 'MERGED' or observed.get('isInMergeQueue') is True
+                     or observed.get('autoMergeRequest') is not None))
+        receipt.update(armed=admitted, auto_merge=observed.get('autoMergeRequest'),
+                       is_in_merge_queue=observed.get('isInMergeQueue'), state=observed.get('state'))
+        if not admitted:
+            receipt['proof'] = ['arm-not-observed']
+
     save(path, receipt)
     return receipt
 
@@ -273,6 +339,8 @@ def main(argv=None):
     parser.add_argument('--now', help='test clock, with --inventory only')
     parser.add_argument('--engine-dry-run', action='store_true')
     args = parser.parse_args(argv)
+    if args.engine_dry_run and args.inventory:
+        parser.error('native engine requires live discovery, not offline fixtures')
     if args.apply and (args.inventory or args.portfolio or args.source_head or args.now or args.engine_dry_run):
         parser.error('apply cannot use fixture/dry-run inputs')
     private_directory(args.state_dir)
@@ -299,14 +367,18 @@ def main(argv=None):
                 rows = []
             roster = parse_active_portfolio(portfolio)
             report.update(source_head=target, active_roster=roster)
+            enrich = None if gh is None else source_reader(gh, target)
             blob_cache, binary = {}, None
             source_rows = {r['repo']: r for r in rows}
+            discovered = []
             for repo in roster:
                 try:
                     if args.inventory:
                         if repo not in source_rows:
                             raise Refused('repository-not-in-fixture')
                         row = dict(source_rows[repo])
+                        if 'error' in row or not isinstance(row.get('files'), dict):
+                            raise Refused('repository-inventory-unreadable')
                         row['files'] = {p if p.startswith('.github/') else '.github/workflows/' + p: t
                                         for p, t in row['files'].items()}
                     else:
@@ -316,16 +388,39 @@ def main(argv=None):
                             continue
                         head = gh.request(f'repos/{repo}/commits/{meta["default_branch"]}')['sha']
                         row = {'repo': repo, 'head': head, 'files': collect_files(gh, repo, head, blob_cache),
-                               'prs': gh.pages(f'repos/{repo}/pulls?state=open')}
+                               'prs': gh.pages(f'repos/{repo}/pulls?state=open'),
+                               'branches': gh.request(f'repos/{repo}/git/matching-refs/heads/renovate/shared-ci-')}
                     if row.get('archived'):
                         report['repositories'].append({'repo': repo, 'skip': 'archived'})
                         continue
                     row['pins'] = parse_pins(row['files'])
-                    changes, unknown = ([], []) if gh is None else changes_since_pin(gh, row['pins'], target, fix_rows)
+                    if enrich:
+                        enrich(row['pins'])
+                    else:
+                        for pin in row['pins']:
+                            pin['dependency_paths'] = row.get('source_dependencies', {}).get('|'.join(pin['roots']), [])
+                    discovered.append(row)
+                except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
+                    cause = str(error) if isinstance(error, Refused) else type(error).__name__
+                    report['alerts'].append({'repo': repo, 'reason': cause})
+                    report['repositories'].append({'repo': repo, 'error': cause})
+            open_rolls = sum(1 for row in discovered for pr in row.get('prs', [])
+                             if pr.get('headRefName', pr.get('head', {}).get('ref', '')).startswith('renovate/shared-ci-'))
+            report.update(open_roll_prs=open_rolls, regular_open_cap=15)
+            for row in discovered:
+                repo = row['repo']
+                try:
+                    changes, unknown = (row.get('changes', []), row.get('unknown_source_history', [])) if gh is None else changes_since_pin(gh, row['pins'], target, fix_rows)
                     existing = [p.get('headRefName', p.get('head', {}).get('ref', '')) for p in row.get('prs', [])]
+                    existing += [b['ref'] for b in row.get('branches', [])]
                     decision = plan_repo(repo, row['files'], target, fix_rows, changes, now, existing,
-                                         regular=regular_due(now))
+                                         regular=regular_due(now), pins=row['pins'])
+                    admit_regular(decision, open_rolls)
+                    if decision.get('should_open'):
+                        open_rolls += 1
                     decision['unknown_source_history'] = unknown
+                    row['ancestry_failures'] = sorted({u['sha'] for u in unknown if u['reason'] == 'pin-is-not-source-main-ancestor' or u['reason'] == 'not-proven-source-ancestor'})
+                    decision['auto_arm_withheld'] = row['ancestry_failures']
                     report['alerts'].extend({'repo': repo, **u} for u in unknown)
                     report['alerts'].extend({'repo': repo, **{k: v for k, v in a.items() if k != 'age_hours'}} for a in decision.get('lag_alerts', []))
                     report['alerts'].extend({'repo': repo, **f} for f in decision.get('findings', []))
@@ -335,6 +430,11 @@ def main(argv=None):
                     if key and decision.get('should_open', True) and (args.apply or args.engine_dry_run):
                         if gh.remaining() <= FLOOR + ENGINE_RESERVE:
                             raise Refused('native-engine-budget-reserve')
+                        prior = gh.pages(f'repos/{repo}/pulls?state=all&head={repo.split("/")[0]}:renovate/shared-ci-{key}')
+                        if prior:
+                            decision.update(should_open=False, prior_pr=True)
+                            report['repositories'].append(decision)
+                            continue
                         binary = binary or install_engine(root)
                         decision.update(run_engine(gh, row, key, target, root, args.state_dir, binary,
                                                    dry_run=not args.apply))

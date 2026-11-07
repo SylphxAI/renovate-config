@@ -27,7 +27,8 @@ def push_args(args: list[str], branch: str) -> list[str]:
         raise ValueError('unapproved push option')
     expected = {branch, f'{branch}:{branch}', f'{branch}:refs/heads/{branch}'}
     refs = [a for a in cleaned if ':' in a or a == branch]
-    if len(refs) != 1 or refs[0] not in expected or 'origin' not in cleaned:
+    if (len(refs) != 1 or refs[0] not in expected or cleaned.count('origin') != 1
+            or any(a not in expected | {'origin', '-u', '--verbose', '--porcelain'} for a in cleaned)):
         raise ValueError('push is not the selected immutable branch')
     if any(a.startswith('+') or a.startswith('--force') for a in cleaned):
         raise ValueError('force push refused')
@@ -35,10 +36,37 @@ def push_args(args: list[str], branch: str) -> list[str]:
 
 
 def clone_args(args: list[str]) -> list[str]:
+    # Accept only the native clone grammar; Git accepts abbreviated options and
+    # attached -c values, so a denylist of configuration spellings is unsafe.
+    if not args or args[0] != 'clone':
+        raise ValueError('invalid clone command')
+    positional = []
+    i = 1
+    while i < len(args):
+        value = args[i]
+        if value in ('-b', '--branch'):
+            if i + 1 >= len(args) or args[i + 1].startswith('-'):
+                raise ValueError('missing clone branch')
+            i += 2
+            continue
+        if (value in ('--no-checkout', '--single-branch', '--no-tags', '--quiet')
+                or re.fullmatch(r'--depth=\d+', value)
+                or value.startswith('--filter=')):
+            i += 1
+            continue
+        if value.startswith('-'):
+            raise ValueError('clone configuration override refused')
+        positional.append(value)
+        i += 1
+    if len(positional) != 2:
+        raise ValueError('invalid clone target')
     if any(a.startswith(('https://', 'http://')) and '@' in a for a in args):
         raise ValueError('credential-bearing URL refused')
     # The engine supplies [clone, -b, base, URL, .]; never materialize asset blobs.
-    return [args[0], '--depth=1', '--filter=blob:none', '--no-checkout', *args[1:]]
+    # Repeated --filter combines filters, which GitHub rejects. Replace the
+    # native blob filter instead of appending another one.
+    selected = [a for a in args[1:] if not a.startswith(('--filter=', '--depth=')) and a != '--no-checkout']
+    return [args[0], '--depth=1', '--filter=blob:none', '--no-checkout', *selected]
 
 
 def call(args: list[str], *, capture: bool = False) -> subprocess.CompletedProcess:
@@ -92,6 +120,26 @@ def main(args: list[str]) -> int:
         raise ValueError('unapproved Git command')
     if any(re.search(r'https?://[^/\s]+@', a) for a in args):
         raise ValueError('credential-bearing Git argv refused')
+    if command == 'config':
+        options = args[index + 1:]
+        if any(re.search(r'(?i)hooksPath|^include(?:If)?\.', a) for a in options):
+            raise ValueError('hook configuration override refused')
+        reads = {'--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l'}
+        if not any(a in reads for a in options):
+            values = [a for a in options if a != '--local']
+            if len(values) == 2 and values[0] not in ('user.name', 'user.email'):
+                raise ValueError('unapproved Git configuration write')
+            if len(values) > 2 or any(a.startswith('-') for a in values):
+                raise ValueError('unapproved Git configuration operation')
+    if command == 'remote':
+        options = args[index + 1:]
+        # Renovate may inspect a remote or set its credential-free fetch URL;
+        # it must never install an alternate pushurl or additional target.
+        if options and options[0] == 'set-url':
+            if len(options) != 3 or options[1] != 'origin' or options[2].startswith('-'):
+                raise ValueError('remote mutation refused')
+        elif options and options[0] not in ('get-url', '-v', '--verbose'):
+            raise ValueError('remote mutation refused')
     if command == 'clone':
         index = args.index('clone')
         result = call(args[:index] + clone_args(args[index:]))
@@ -119,6 +167,14 @@ def main(args: list[str]) -> int:
             sys.path.insert(0, str(Path(__file__).resolve().parent))
             from pin_proof import prove_files
             proof = json.loads(Path(manifest).read_text())
+            remote = call(['remote', 'get-url', 'origin'], capture=True)
+            push_remote = call(['remote', 'get-url', '--push', '--all', 'origin'], capture=True)
+            repo = proof['repo']
+            if remote.returncode or remote.stdout.strip() not in (
+                    f'git@github.com:{repo}.git', f'https://github.com/{repo}.git'):
+                raise ValueError('selected consumer remote changed')
+            if push_remote.returncode or push_remote.stdout.strip() != remote.stdout.strip():
+                raise ValueError('selected consumer push remote changed')
             parent = call(['rev-parse', f'{branch}^'], capture=True)
             if parent.returncode or parent.stdout.strip() != proof['base_head']:
                 raise ValueError('consumer base changed')

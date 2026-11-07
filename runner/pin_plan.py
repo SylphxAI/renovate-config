@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
+from hashlib import sha256
 from itertools import product
 import re
 from typing import Any
@@ -231,18 +232,47 @@ def _date(value: Any) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def regular_weekday(repo: str) -> int:
+    """Stable Mon=0..Fri=4 slot, independent of process hash randomization.
+
+    GitHub repository names are case-insensitive. Use SHA-256 of the casefolded
+    full owner/name, first eight digest bytes as an unsigned big-endian integer,
+    modulo five. Never use Python's randomized ``hash()`` for fleet scheduling.
+    """
+    return int.from_bytes(sha256(repo.casefold().encode("utf-8")).digest()[:8], "big") % 5
+
+
+def _changed_paths(changed_files: list) -> list[str]:
+    return [(item.get("filename", "") if isinstance(item, dict) else str(item)).removeprefix("./")
+            for item in changed_files]
+
+
 def _affected(pin: dict, changed_files: list) -> bool:
-    paths = [item.get("filename", "") if isinstance(item, dict) else str(item) for item in changed_files]
-    for path in paths:
-        path = path.removeprefix("./")
-        # Shared helpers are transitive inputs to actions and workflows. Without
-        # a source dependency graph, narrowing these would silently omit callers.
-        if path.startswith("scripts/"):
-            return True
-        for root in pin["roots"]:
-            if root == "" or path == root or path.startswith(root.rstrip("/") + "/"):
-                return True
-    return False
+    # The runner owns the declared dependency closure at the immutable source.
+    # Missing closure does not mean every script is a dependency. Empty roots
+    # retain discovery's uncertainty, but are not positive change evidence.
+    roots = [root.removeprefix("./").rstrip("/") for root in
+             [*pin["roots"], *pin.get("dependency_paths", [])] if root]
+    return any(path == root or path.startswith(root + "/")
+               for path in _changed_paths(changed_files) for root in roots)
+
+
+def _dependency_findings(pins: list[dict], record: dict) -> list[dict]:
+    paths = _changed_paths(record.get("files", []))
+    pending = [pin for pin in pins if _ancestry(pin, record) != "included"]
+    unknown_scripts = [pin for pin in pending if "dependency_paths" not in pin
+                       and any(path.startswith("scripts/") for path in paths)
+                       and not _affected(pin, [path for path in paths if path.startswith("scripts/")])]
+    findings = []
+    if unknown_scripts:
+        findings.append({"kind": "dependency_unknown", "sha": record["sha"],
+                         "paths": sorted({pin["path"] for pin in unknown_scripts}),
+                         "source_paths": sorted(path for path in paths if path.startswith("scripts/"))})
+    opaque = [pin for pin in pending if not any(pin["roots"]) and not pin.get("dependency_paths")]
+    if paths and opaque:
+        findings.append({"kind": "consumption_unknown", "sha": record["sha"],
+                         "paths": sorted({pin["path"] for pin in opaque})})
+    return findings
 
 
 def _ancestry(pin: dict, change: dict) -> str:
@@ -411,7 +441,8 @@ def estimate_pr_ci_jobs(files: dict[str, str], changed_paths: list[str]) -> dict
 
 
 def plan_repo(repo: str, files: dict[str, str], source_head: str, fixes: list[dict],
-              changes: list[dict], now: datetime, existing_branches: list[str], regular: bool) -> dict:
+              changes: list[dict], now: datetime, existing_branches: list[str], regular: bool,
+              *, pins: list[dict] | None = None) -> dict:
     """Report a deterministic candidate without writing to GitHub.
 
     A regular batch gets an ISO-week key, urgent batches use the latest missing
@@ -419,18 +450,41 @@ def plan_repo(repo: str, files: dict[str, str], source_head: str, fixes: list[di
     again. Outdated means different from source_head, NOT proven behind it.
     Fix qualification and >24h marked / >8d general alerts require both consumed
     path relevance and explicit ancestry. Durations are strict greater-than.
+
+    Regular rolls additionally require a relevant source change proven behind
+    a consumed pin and the repository's stable Mon-Fri slot. Main-head inequality
+    alone is never eligible. The optional ``pins`` argument accepts parse_pins
+    records enriched by the runner with per-pin ``dependency_paths``: declared
+    transitive source paths/directories. An explicitly empty closure means no
+    shared dependencies; an absent closure yields dependency_unknown for script
+    changes, not blanket relevance. Changes with ``lag_eligible=False`` may prove
+    regular eligibility but never create age alerts (e.g. a per-pin compare
+    snapshot whose timestamp is not the change's original merge time). Multiple
+    aggregate records may share sha; each retains its own file/pin association.
+    Fleet PR caps belong to the runner.
     """
     now = _date(now)
-    pins = parse_pins(files)
+    pins = parse_pins(files) if pins is None else [dict(pin) for pin in pins]
     outdated = [pin for pin in pins if pin.get("sha") and pin["sha"].lower() != source_head.lower()]
     findings = [{"kind": pin["finding"], "path": pin["path"], "ref": pin.get("ref")}
                 for pin in pins if pin.get("finding")]
     qualifying = []
+    relevant_changes = []
     alerts = []
-    records = {str(change["sha"]).lower(): (change, False) for change in changes}
-    records.update({str(fix["sha"]).lower(): (fix, True) for fix in fixes})
-    for _, (record, marked) in sorted(records.items()):
-        relevant = [pin for pin in pins if _affected(pin, record.get("files", []))]
+    fix_shas = {str(fix["sha"]).lower() for fix in fixes}
+    # Per-pin aggregate comparisons can share source_head but have different
+    # changed files. Keep their file/behind_pins association; unioning them would
+    # falsely attribute another old pin's changes to this pin.
+    records = [(change, False) for change in changes
+               if change.get("lag_eligible") is False or str(change["sha"]).lower() not in fix_shas]
+    records.extend((fix, True) for fix in fixes)
+    records.sort(key=lambda item: (str(item[0]["sha"]), item[1],
+                                  tuple(sorted(item[0].get("behind_pins", []))),
+                                  tuple(sorted(_changed_paths(item[0].get("files", []))))))
+    for record, marked in records:
+        findings.extend(_dependency_findings(pins, record))
+        relevant = [pin for pin in pins if (not record.get("comparison_pin") or
+                    pin.get("sha") == record["comparison_pin"]) and _affected(pin, record.get("files", []))]
         states = [(pin, _ancestry(pin, record)) for pin in relevant]
         behind = [pin for pin, state in states if state == "behind"]
         unknown = [pin for pin, state in states if state in ("unknown", "conflict")]
@@ -453,11 +507,12 @@ def plan_repo(repo: str, files: dict[str, str], source_head: str, fixes: list[di
         detail["behind_pins"] = sorted({pin["sha"] for pin in behind})
         detail["affected_paths"] = sorted({pin["path"] for pin in behind})
         detail["consumed_roots"] = sorted({root for pin in behind for root in pin["roots"]})
+        relevant_changes.append(detail)
         if marked:
             qualifying.append(detail)
         age = now - merged_at
         threshold = timedelta(hours=24) if marked else timedelta(days=8)
-        if age > threshold:
+        if record.get("lag_eligible", True) and age > threshold:
             alerts.append({"kind": "marked_fix" if marked else "general", "sha": record["sha"],
                            "number": record.get("number"), "merged_at": merged_at.isoformat(),
                            "age_hours": age.total_seconds() / 3600,
@@ -478,10 +533,16 @@ def plan_repo(repo: str, files: dict[str, str], source_head: str, fixes: list[di
     branches = {item.removeprefix("refs/heads/") for item in existing_branches}
     exists = branch_key is not None and (branch_key in branches or f"renovate/shared-ci-{branch_key}" in branches)
     ci_jobs = estimate_pr_ci_jobs(files, sorted({pin["path"] for pin in outdated}))
+    regular_day = regular_weekday(repo)
+    regular_due = now.weekday() == regular_day
+    eligible = bool(qualifying or (regular and regular_due and relevant_changes))
     return {"repo": repo, "source_head": source_head, "pins": pins,
             "pin_count": len(pins), "outdated_pins": outdated, "outdated_count": len(outdated),
             "outdated_semantics": "Full-SHA pins unequal to source_head; ancestry is not implied.",
-            "qualifying_fixes": qualifying, "lag_alerts": alerts, "findings": findings,
+            "qualifying_fixes": qualifying, "relevant_changes": relevant_changes,
+            "lag_alerts": alerts, "findings": findings,
+            "regular_day": regular_day, "regular_due": regular_due,
+            "regular_eligible": bool(regular and regular_due and relevant_changes),
             "branch_key": branch_key, "branch_exists": exists, "reason": reason,
-            "should_open": bool(outdated and branch_key and not exists),
+            "should_open": bool(outdated and branch_key and not exists and eligible),
             "estimated_ci_jobs": ci_jobs}

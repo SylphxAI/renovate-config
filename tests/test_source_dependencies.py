@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runner'))
-from source_dependencies import dependency_paths, touches
+from source_dependencies import DependencyUnknown, dependency_paths, touches
 from shared_pins import admit_regular, changes_since_pin, regular_due, engine_config, main, source_reader
 from pin_plan import regular_weekday, parse_pins, plan_repo
 from github_io import Refused
@@ -51,7 +51,7 @@ class HistoricalConsumption(unittest.TestCase):
                  f'steps:\n  - uses: SylphxAI/.github/{self.root}@{self.old} # main\n'}
         return SourceGitHub(sources), files, parse_pins(files)
 
-    def test_removed_historical_helper_fix_qualifies_without_unrelated_churn(self):
+    def test_removed_historical_helper_fix_and_coarse_siblings_qualify(self):
         for changed in ('scripts/old.py', 'scripts/helper.py'):
             with self.subTest(changed=changed):
                 gh, files, pins = self.fixture()
@@ -59,13 +59,13 @@ class HistoricalConsumption(unittest.TestCase):
                 fixes = [{'sha': 'c' * 40, 'merged_at': '2026-11-01T00:00:00Z',
                           'files': [changed], 'behind_pins': [self.old]},
                          {'sha': 'd' * 40, 'merged_at': '2026-11-02T00:00:00Z',
-                          'files': ['scripts/unrelated.py'], 'behind_pins': [self.old]}]
+                          'files': ['.github/actions/unrelated/action.yml'], 'behind_pins': [self.old]}]
                 result = plan_repo('SylphxAI/fixture', files, self.target, fixes, [],
                                    datetime(2026, 11, 7, tzinfo=timezone.utc), [], False, pins=pins)
                 self.assertEqual([f['sha'] for f in result['qualifying_fixes']], ['c' * 40])
                 self.assertTrue(result['should_open'])
                 self.assertEqual(pins[0]['dependency_paths'], [self.root + '/action.yml',
-                                 'scripts/helper.py', 'scripts/new.py', 'scripts/old.py'])
+                                 'scripts/helper.py', 'scripts/new.py', 'scripts/old.py', 'scripts/unrelated.py'])
 
     def test_revision_and_blob_reuse_keeps_distinct_pin_closures(self):
         gh, _, pins = self.fixture()
@@ -80,7 +80,7 @@ class HistoricalConsumption(unittest.TestCase):
         enrich([*pins, newer])
         enrich(pins)
         self.assertEqual(len(gh.requests), 2)
-        self.assertEqual(len(gh.reads), 5)  # 2 actions + 2 entry scripts + shared blob.
+        self.assertEqual(len(gh.reads), 6)  # 2 actions + 2 scripts + shared + identical pass blobs.
         self.assertIn('scripts/old.py', pins[0]['dependency_paths'])
         self.assertNotIn('scripts/old.py', newer['dependency_paths'])
         self.assertIn('scripts/shared.py', newer['dependency_paths'])
@@ -152,30 +152,163 @@ class HistoricalConsumption(unittest.TestCase):
         unsupported = dict(pins[0], sha=None, ref='main')
         unresolved = dict(pins[0], roots=[''])
         current = dict(pins[0], sha=self.target)
-        source_reader(gh, self.target)([unsupported, unresolved, current])
+        enrich = source_reader(gh, self.target)
+        enrich([unsupported, current])
+        with self.assertRaisesRegex(Refused, 'source-dependencies-unreadable:.*DependencyUnknown'):
+            enrich([unresolved])
         self.assertEqual(len(gh.requests), 1)
-        self.assertEqual(unresolved['dependency_paths'], [])
+        self.assertNotIn('dependency_paths', unresolved)
 
 
 class DeclaredConsumption(unittest.TestCase):
-    def test_action_script_and_python_import_closure_without_unrelated_scripts(self):
+    def test_action_script_closure_keeps_whole_script_tree_not_other_actions(self):
         files = {'.github/actions/a/action.yml': 'run: python scripts/a.py',
                  'scripts/a.py': 'import helper\nfrom common.check import run',
                  'scripts/helper.py': 'print("ok")',
                  'scripts/common/check.py': 'pass', 'scripts/unrelated.py': 'pass'}
         got = dependency_paths(['.github/actions/a'], files, files.__getitem__)
         self.assertEqual(got, ['.github/actions/a/action.yml', 'scripts/a.py',
-                               'scripts/common/check.py', 'scripts/helper.py'])
+                               'scripts/common/check.py', 'scripts/helper.py', 'scripts/unrelated.py'])
         pin = {'roots': ['.github/actions/a'], 'dependency_paths': got}
         self.assertTrue(touches(pin, ['scripts/helper.py']))
-        self.assertFalse(touches(pin, ['scripts/unrelated.py', '.github/actions/b/action.yml']))
-        self.assertEqual(dependency_paths([''], files, files.__getitem__), [])
+        self.assertTrue(touches(pin, ['scripts/unrelated.py']))
+        self.assertFalse(touches(pin, ['.github/actions/b/action.yml']))
+        with self.assertRaisesRegex(DependencyUnknown, 'local-consumption-unresolved'):
+            dependency_paths([''], files, files.__getitem__)
         self.assertFalse(touches({'roots': ['']}, ['scripts/a.py']))
 
     def test_local_action_dependency(self):
         files = {'.github/workflows/a.yml': 'uses: ./.github/actions/a',
                  '.github/actions/a/action.yml': 'run: python scripts/a.py', 'scripts/a.py': 'pass'}
         self.assertEqual(set(dependency_paths(['.github/workflows/a.yml'], files, files.__getitem__)), set(files))
+
+    def test_package_relative_import_reviewer_regression_enrolls_siblings_and_init(self):
+        root = '.github/actions/a'
+        files = {root + '/action.yml': 'run: python scripts/run.py',
+                 root + '/policy.json': '{}',
+                 'scripts/run.py': 'from pkg.entry import run',
+                 'scripts/pkg/__init__.py': '',
+                 'scripts/pkg/entry.py': 'from .helper import check\ndef run(): check()',
+                 'scripts/pkg/helper.py': 'def check(): pass',
+                 'scripts/pkg/data.json': '{}',
+                 'scripts/not_imported.py': 'pass',
+                 '.github/actions/unrelated/action.yml': 'run: echo unrelated'}
+        closure = dependency_paths([root], files, files.__getitem__)
+        self.assertEqual(set(closure), set(files) - {'.github/actions/unrelated/action.yml'})
+        old, target, fix = 'a' * 40, 'b' * 40, 'c' * 40
+        workflows = {'.github/workflows/a.yml': f'uses: SylphxAI/.github/{root}@{old}'}
+        pins = parse_pins(workflows)
+        source_reader(SourceGitHub({old: files, target: files}), target)(pins)
+        result = plan_repo('SylphxAI/fixture', workflows, target, [
+            {'sha': fix, 'files': ['scripts/pkg/helper.py'], 'behind_pins': [old],
+             'merged_at': '2026-11-01T00:00:00Z'}], [],
+            datetime(2026, 11, 7, tzinfo=timezone.utc), [], False, pins=pins)
+        self.assertTrue(result['should_open'])
+        self.assertEqual([r['sha'] for r in result['qualifying_fixes']], [fix])
+
+    def test_action_sibling_paths_and_transitive_shared_helper_trees(self):
+        files = {'.github/actions/a/action.yml':
+                 'run: python "$GITHUB_ACTION_PATH/../b/entry.py"',
+                 '.github/actions/a/config.json': '{}',
+                 '.github/actions/b/entry.py':
+                 'from pathlib import Path\nimport sys\nsys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_shared"))\nfrom broker import run',
+                 '.github/actions/b/sibling.dat': 'bytes',
+                 '.github/actions/_shared/broker.py': 'from common.entry import run',
+                 '.github/actions/_shared/policy.json': '{}',
+                 'lib/common/__init__.py': 'from .helper import check',
+                 'lib/common/entry.py': 'from .helper import check',
+                 'lib/common/helper.py': 'check = 1',
+                 'lib/common/data.json': '{}',
+                 '.github/actions/unrelated/action.yml': 'run: echo no',
+                 'other/not_used.py': 'pass'}
+        expected = set(files) - {'.github/actions/unrelated/action.yml', 'other/not_used.py'}
+        self.assertEqual(set(dependency_paths(['.github/actions/a'], files, files.__getitem__)), expected)
+
+    def test_file_root_keeps_whole_action_tree_and_reads_each_code_blob_once(self):
+        files = {'.github/actions/a/nested/entry.py': 'from .helper import check',
+                 '.github/actions/a/nested/helper.py': 'check = 1',
+                 '.github/actions/a/policy.json': '{}',
+                 '.github/actions/a/action.yml': 'run: echo yes',
+                 '.github/actions/b/action.yml': 'run: echo no'}
+        reads = []
+        def read(path):
+            reads.append(path)
+            return files[path]
+        got = dependency_paths(['.github/actions/a/nested/entry.py', '.github/actions/a'], files, read)
+        self.assertEqual(set(got), set(files) - {'.github/actions/b/action.yml'})
+        self.assertEqual(len(reads), 3)
+        self.assertEqual(len(reads), len(set(reads)))
+
+    def test_explicit_unresolvable_local_consumption_is_typed_unknown(self):
+        root = '.github/actions/a'
+        cases = [([], {}, 'local-consumption-unresolved'),
+                 ([''], {}, 'local-consumption-unresolved'),
+                 ([root], {}, 'local-path-missing'),
+                 ([root], {root + '/action.yml': 'uses: ./.github/actions/missing'}, 'local-path-missing'),
+                 ([root], {root + '/action.yml': 'run: python scripts/missing.py'}, 'local-reference-missing'),
+                 ([root], {root + '/action.yml': 'run: node tools/missing.js'}, 'local-reference-missing'),
+                 ([root], {root + '/action.yml': 'runs:\n  using: composite\n  steps:\n    - shell: bash\n      run: ./scripts/missing.sh\n'}, 'local-reference-missing'),
+                 ([root], {root + '/action.yml': 'run: python "$GITHUB_ACTION_PATH/../missing/run.py"'}, 'local-path-missing'),
+                 ([root], {root + '/action.yml': 'run: bash tools/check', 'tools/check': 'echo ok'}, 'executable-source-type-unknown'),
+                 ([root], {root: 'link-target'}, 'local-directory-unresolved'),
+                 ([root], {root + '/entry.py': 'from .missing import run'}, 'relative-import-missing'),
+                 ([root], {root + '/entry.py': 'from ('}, 'python-source-unparseable')]
+        for roots, files, reason in cases:
+            with self.subTest(reason=reason, files=files):
+                with self.assertRaisesRegex(DependencyUnknown, reason):
+                    dependency_paths(roots, files, files.__getitem__)
+
+    def test_dynamic_action_leaf_enrolls_literal_parent_tree(self):
+        files = {'.github/actions/a/action.yml':
+                 'run: python "$GITHUB_ACTION_PATH/../helpers/$TOOL.py"',
+                 '.github/actions/helpers/tool.py': 'pass',
+                 '.github/actions/helpers/data.json': '{}',
+                 '.github/actions/unrelated/action.yml': 'run: echo no'}
+        self.assertEqual(set(dependency_paths(['.github/actions/a'], files, files.__getitem__)),
+                         set(files) - {'.github/actions/unrelated/action.yml'})
+
+    def test_missing_historical_run_input_is_unknown_and_can_recover(self):
+        old, target, root = 'a' * 40, 'b' * 40, '.github/actions/a'
+        files = {'.github/workflows/a.yml': f'uses: SylphxAI/.github/{root}@{old}'}
+        source = {root + '/action.yml': 'run: python scripts/run.py', 'scripts/run.py': 'pass'}
+        gh = SourceGitHub({old: {root + '/action.yml': 'run: python scripts/old.py'}, target: source})
+        pins = parse_pins(files)
+        with self.assertRaisesRegex(Refused, 'source-dependencies-unreadable:' + old + ':DependencyUnknown'):
+            source_reader(gh, target)(pins)
+        self.assertNotIn('dependency_paths', pins[0])
+        gh.sources[old]['scripts/old.py'] = 'pass'
+        source_reader(gh, target)(pins)
+        self.assertTrue(set(source) <= set(pins[0]['dependency_paths']))
+        self.assertIn('scripts/old.py', pins[0]['dependency_paths'])
+
+    def test_yaml_templates_are_included_as_data_not_executed(self):
+        files = {'.github/actions/a/action.yml': 'run: python scripts/generate.py',
+                 'scripts/generate.py': 'template = "uses: ./.github/actions/missing"',
+                 'scripts/template.yml': 'uses: ./.github/actions/missing'}
+        self.assertEqual(set(dependency_paths(['.github/actions/a'], files, files.__getitem__)), set(files))
+        with self.assertRaisesRegex(DependencyUnknown, 'local-path-missing'):
+            dependency_paths(['scripts/template.yml'], files, files.__getitem__)
+
+    def test_shared_checkout_alias_requires_source_repository_provenance(self):
+        workflow = ('steps:\n  - uses: actions/checkout@v4\n    with:\n'
+                    '      repository: SylphxAI/.github\n      path: lane\n'
+                    '  - uses: ./lane/.github/actions/helper\n')
+        files = {'.github/workflows/a.yml': workflow,
+                 '.github/actions/helper/action.yml': 'run: echo yes',
+                 '.github/actions/helper/policy.json': '{}'}
+        self.assertEqual(set(dependency_paths(['.github/workflows/a.yml'], files, files.__getitem__)), set(files))
+        files['.github/workflows/a.yml'] = workflow.replace('SylphxAI/.github', 'other/repo')
+        with self.assertRaisesRegex(DependencyUnknown, 'local-path-missing:lane/'):
+            dependency_paths(['.github/workflows/a.yml'], files, files.__getitem__)
+
+    def test_copied_pinned_tools_keep_source_directory_provenance(self):
+        files = {'.github/actions/a/action.yml':
+                 'run: |\n  for tool in run; do\n    cp "$GITHUB_ACTION_PATH/../../../scripts/$tool.py" "lane/scripts/$tool.py"\n  done\n  python lane/scripts/run.py\n',
+                 'scripts/run.py': 'pass', 'scripts/policy.json': '{}'}
+        self.assertEqual(set(dependency_paths(['.github/actions/a'], files, files.__getitem__)), set(files))
+        files['.github/actions/a/action.yml'] = 'run: python lane/scripts/missing.py'
+        with self.assertRaisesRegex(DependencyUnknown, 'local-reference-missing'):
+            dependency_paths(['.github/actions/a'], files, files.__getitem__)
 
     def test_ordinary_cap_but_explicit_fix_bypasses_it(self):
         regular = {'should_open': True, 'qualifying_fixes': []}
@@ -232,9 +365,11 @@ class DeclaredConsumption(unittest.TestCase):
             def request(self, _): return {'files': [{'filename': '.github/actions/a/action.yml'}]}
         pin = {'sha': 'a' * 40, 'roots': ['.github/actions/a']}
         changes, unknown = changes_since_pin(GH(), [pin], 'b' * 40, [])
-        self.assertEqual(len(changes), 1)
-        self.assertEqual(changes[0]['files'], ['.github/actions/a/action.yml'])
-        self.assertEqual(changes[0]['behind_pins'], ['a' * 40])
+        self.assertEqual(len(changes), 2)
+        self.assertFalse(changes[0]['lag_eligible'])
+        self.assertEqual(len(changes[0]['files']), 300)
+        self.assertEqual(changes[1]['files'], ['.github/actions/a/action.yml'])
+        self.assertEqual(changes[1]['behind_pins'], ['a' * 40])
         self.assertEqual({u['reason'] for u in unknown}, {'comparison-files-incomplete', 'source-history-incomplete'})
 
     def test_nonancestor_warning_is_in_native_pr_body_with_automerge_disabled(self):

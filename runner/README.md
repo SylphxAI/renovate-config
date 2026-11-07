@@ -1,95 +1,149 @@
-# Self-hosted Renovate runner
+# Shared CI pin pass
 
-The hosted Mend app stopped producing PRs for the org in July 2026 and needs a
-human sign-in to recover, so Renovate runs here instead:
-[`.github/workflows/dependency-updates.yml`](../.github/workflows/dependency-updates.yml)
-on a schedule (hourly 14:00-22:00 UTC, the preset's 22:00-06:00 Hong Kong
-window, plus 04:00 UTC) and on `workflow_dispatch`.
+Renovate propagates shared `SylphxAI/.github` action and workflow pins from a
+GitOps-supervised desk process, not from an Actions App writer. The previous
+`dependency-updates.yml` writer and its static repository/App scope are removed.
+The shared package is disabled in the public preset so a second Renovate
+installation cannot create competing shared-pin branches. Other dependency
+preset settings are unchanged; this process updates shared CI pins only.
 
-- **Scope**: `repositories` in [`config.json`](config.json) - every repository
-  in the company portfolio whose workflows pin the shared `SylphxAI/.github`
-  actions and reusable workflows, across the five orgs in `orgs`; the workflow
-  runs one Renovate job per entry, eight at a time. Renovate skips an archived
-  repository. `citra` and `kernox` are left out on purpose: Dependabot owns
-  every ecosystem there, and one updater per ecosystem avoids duplicate PRs.
-  Add a repository by adding it to the list. A repository whose
-  `sylphx_delivery` custom property is `delivered` (a finished customer
-  project) is skipped at plan time, whatever the list says.
-- **One updater per ecosystem**: the enforced org code security configuration
-  turns on Dependabot security updates, so Dependabot opens vulnerability PRs
-  and Renovate (`vulnerabilityAlerts.enabled: true` in the preset) opens
-  version updates.
-- **Defaults**: every repository in scope gets `github>SylphxAI/renovate-config`
-  without an onboarding PR; a repository's own Renovate config overrides it.
-- **Auth**: a GitHub App installation token minted per run with
-  `actions/create-github-app-token`, one per matrix repository's org. The App id
-  is the `renovate` environment variable `RENOVATE_APP_ID`, the key the
-  environment secret `RENOVATE_APP_PRIVATE_KEY`; the environment deploys from
-  `main` only and has no required reviewers, so it never waits for approval. The
-  App is installed once on each org in `config.json` `orgs`; a repository under
-  an org the App is not installed on fails its own job only. PRs opened with an
-  App token trigger CI, so the preset's non-major automerge lands through each
-  repository's merge queue.
+## Scope, cadence and cost
 
-  Why the file is not called `renovate.yml`: GitHub stopped creating jobs for
-  that file's workflow registration on 2026-10-06 while its body stayed valid.
-  From 2026-10-11 every dispatch and schedule sat `pending` with zero jobs and no
-  runner was ever allocated. A byte-identical copy under another name queued a
-  job in seconds when tested on 2026-10-15, so the workflow is carried under a
-  new file name and the stale registration is dropped with the old path.
+Each pass reads the current `SylphxAI/owner` main `company/portfolio.md`.
+Only Repository cells in its Drive/Maintain tables are eligible; paused, parked,
+retired, archived and delivered entries are excluded. Foundation support repos
+belong in that same file, not in a code exception list. An archived GitHub repo
+is skipped even if the portfolio has not caught up.
 
-## The App
+- Regular: one stable assigned weekday Monday–Friday, beginning **04:17 UTC**,
+  one grouped immutable PR per consumer per ISO week. The first eight bytes of
+  SHA256(casefold(repo)), big-endian, modulo five choose the weekday. Hourly
+  checks on that day can catch up after capacity frees. All shared pins in that
+  repo are one change, not one PR per action. A roll is eligible only after a
+  consumed action/workflow directory or a reached script/helper directory tree
+  changed since a current pin. Precise import tracing may only add paths to
+  these coarse trees; unrelated action directories stay excluded.
+  At most **15 roll PRs** may be open across the active roster before regular
+  admission pauses; the next eligible pass re-evaluates capacity. Every known
+  open roll counts even if consumer/source discovery later fails. If any
+  active consumer's open-PR inventory is unreadable, capacity is unknown and
+  no new regular or expedited roll opens.
+- Expedited: label a source PR **`shared-action-fix`** before or after its merge.
+  A merged labelled PR qualifies only where its changed action/workflow path is
+  consumed and the old pin is proven behind its merge SHA. The consumed closure
+  includes the whole used action tree, every directory
+  reached by executable script/local-uses paths, and transitive shared-helper
+  trees, including package-relative imports and package initializers, at both
+  the existing pin and target revision. Unresolvable consumption is unknown,
+  never known-empty or blanket whole-source eligibility. Fix rolls
+  bypass the weekday and open-PR cap. The full merge SHA is the idempotency key.
+  The latest missing qualifying fix in a pass groups the pending fixes.
+- Read-only lag report: hourly at minute 17, alert for a missing marked fix after
+  **more than 24 hours**, or an ordinary consumed change after **more than
+  8 days**. Equal SHAs or included fixes do not lag; unknown ancestry/unsupported
+  refs/incomplete reads alert separately rather than claiming a healthy fleet.
 
-Today the runner uses the org-owned **Sylphx Builder** App (id 2847814):
-contents, pull requests, issues, checks and statuses write. It has no
-`workflows` permission, so a push that edits `.github/workflows` is rejected and
-a GitHub Actions pin (which always lives in a workflow file) cannot be carried.
-`github-actions` is enabled in [`config.json`](config.json) so the manager
-computes those updates, but each push is refused until the App can write
-workflows.
+Branches are `renovate/shared-ci-week-YYYY-NN` or
+`renovate/shared-ci-fix-<40-character merge SHA>`. Existing keys are never
+rebased, force-pushed, recreated or retargeted. A blocked immutable PR requires
+operator review; its continued lag stays visible. No emergency or older pin PR
+is edited or closed. An unreadable repository or historical source dependency
+tree/blob is excluded from writes and reported unknown, never green.
+A non-ancestor pin can be proposed but cannot auto-arm; its PR body names the
+ancestry failure and the report retains it for operator review.
+The report includes per-repo static PR job expansion (finite matrices and local
+reusable workflows); dynamic or external reusable expansion is explicitly
+unknown. These are job estimates, not executed jobs or runner minutes.
 
-The target is a dedicated **Sylphx Renovate** App with `workflows: write`. This
-is a one-time org-owner step (creating an App and installing it needs the GitHub
-web UI):
+## Identity, credentials and publication
 
-1. <https://github.com/organizations/SylphxAI/settings/apps/new>: name
-   `Sylphx Renovate`, homepage `https://github.com/SylphxAI/renovate-config`,
-   webhook off. Repository permissions: Checks, Contents, Issues, Pull
-   requests, Commit statuses, Workflows - read and write; Dependabot alerts -
-   read; Administration - read. Organization: Members - read. Only on this
-   account.
-2. Generate a private key; install the App on every org in
-   `config.json` `orgs` (SylphxAI, Cubeage, EpiowAI, OzyrixLtd), all
-   repositories. An org the App is missing is left out of
-   scope until it is installed.
-3. `gh variable set RENOVATE_APP_ID -R SylphxAI/renovate-config --env renovate --body <id>`
-   and `gh secret set RENOVATE_APP_PRIVATE_KEY -R SylphxAI/renovate-config --env renovate < key.pem`.
+The service inherits the desk's existing connected `gh` delegation. The runner
+uses the installed unwrapped CLI for the local `gh auth token` read only,
+then uses the metered wrapper for every API/merge call. It captures the token only in process memory; each pass verifies `/user` is
+User **shtse8** with **repo + workflow** OAuth scopes, failing closed with no App
+fallback. There is no new repository, Actions environment or on-disk token.
+This uses owner `company/github-apps.md`'s connected-user mode (installation
+mode is infrastructure/review only) and `company/credentials.md` preference #4:
+read authorized existing custody in-process instead of duplicating a secret.
 
-## Adding an org
+Renovate and Node are integrity-locked by `package-lock.json`. The native custom
+regex manager extracts, resolves, edits and commits the full SHA uses scalars
+and checkout `repository: SylphxAI/.github` / `ref:` scalars (either field order).
+The discovery/proof code does not implement a second dependency updater.
+Non-immutable refs are reported and never invented into a SHA pin.
 
-Installing the App on an org (step 2 above) is the only step that needs the
-owner. Once it is installed and its repositories are in `repositories`, the next
-scheduled run covers them.
+Renovate uses credential-free SSH remote strings. Its supported host-rule Git
+authentication passes the HTTPS rewrite in the child environment, never argv or
+stored `.git/config`. `git_transport.py` is the sole Git executable in that
+child's path. It translates Renovate's new-ref force-with-lease request into a
+**plain push only after proving that exact branch absent**; existing refs and
+all other remote writes refuse. Every proof, absence probe and push uses one
+resolved repository and one validated environment. Caller-supplied Git context
+options and environment overrides refuse, except the literal native quotePath
+prefix, exact same-host authentication shape and fixed LFS/prompt/SSH/strict-
+option values. The effective push URL is checked immediately before push.
+A durable attempt marker precedes the call;
+unknown outcomes are reconciled, never blindly replayed. The desk pre-push
+scanner hook stays enabled (`gitNoVerify: []`).
 
-## Delivered customer repositories
+Opened PRs have `ci: update shared action pins` as title (no review prefix or
+identity wording). The runner arms normal squash auto-merge only after reading
+that opened PR's exact head and proving:
 
-A repository whose `sylphx_delivery` custom property is `delivered` is a
-finished customer project and never receives an automated PR. The plan job reads
-the property for every repository in scope and drops the ones set to
-`delivered`; the read fails closed so an unreadable property never opens PRs.
+1. Every byte edit is an existing shared SHA span, with the ` # main` comment
+   retained; parsed YAML changes only uses/ref scalars.
+2. The new SHA is on source main and descends from every replaced old SHA.
+3. The consumer is in the derived active roster; changed files and live PR head
+   match the proof.
 
-## Commit identity and existing branches
+It uses `gh pr merge --auto --squash --match-head-commit <head>` and records the
+proof/attempt/readback. Consumer CI, its review gate and merge queue remain
+required. Failed proofs leave the PR unarmed and alert. Implementation PRs and
+all dry runs are unarmed.
 
-`ignorePrAuthor: true` lets the runner discover existing dependency PRs even
-when they were opened under a previous Renovate identity. It does not relax
-the commit-author checks protecting human edits.
+## Run and recover
 
-Dependency commits use `Kyle Tse <hi@kylet.se>`, matching the contribution
-policy. The runner also recognizes the two exact historical dependency-bot
-emails through `gitIgnoredAuthors`; it does not treat other authors as safe to
-overwrite. This keeps old bot-only branches eligible for conflict rebases and
-version updates without discarding a person's edits.
+Prerequisites: desk `gh`, Git, npm, Python with PyYAML 6.0 or newer (CI pins 6.0.3), and `desk-publish`
+for installing the existing pre-push hook. The GitOps service in
+`SylphxAI/infra` owns scheduling, locks, low CPU/IO priority, the 55-minute
+process-group deadline, 4 GiB sampled cache cap, cleanup and durable notification
+to `agent:xenon`. It clones the source depth 1, blobless, sparse, and skips LFS;
+consumer clones use the same depth/filter/no-LFS policy and only materialize
+`.github/` plus Renovate config. Repositories run serially. Cache is deleted
+after every pass. No LLM polling schedule is involved.
 
-Keep `rebaseWhen: conflicted`: merge queues test against current main. A queue
-ruleset must not additionally require the PR branch to be up to date; that
-would strand already-armed updates and require redundant full CI on rebases.
+```sh
+# Read-only fleet discovery (default); no engine install or consumer writes.
+python3 runner/shared_pins.py --state-dir /tmp/shared-pin-report --cache-root /tmp/shared-pin-cache
+# Native Renovate dry run on admitted candidates; push adapter refuses writes.
+python3 runner/shared_pins.py --state-dir /tmp/shared-pin-native-report --cache-root /tmp/shared-pin-native-cache --engine-dry-run
+# Production, only through the GitOps supervisor:
+python3 runner/shared_pins.py --state-dir /scratch/coordinator/state/shared-pins --cache-root /tmp/renovate-shared-pins --apply
+```
+
+`report.json` records source head, roster, candidates, findings, job estimates
+and peak/final allocated cache bytes. `lag.trigger` contains actionable findings;
+the service treats its contents as an opaque deduplication digest and sends only
+a static message/report path. A complete zero-alert pass clears it. Interrupted
+passes do not clear an existing alert. Persistent push/arm claim files protect
+unknown requests: inspect remote branch, PR, checks and queue membership before
+reconciling a claim. Never delete a claim just to repeat a refused mutation.
+The runner reserves native API headroom above the desk poll floor and never
+switches credentials or lowers a shared limiter.
+
+## Test
+
+```sh
+python3 -m unittest discover -s tests -p 'test_*.py'
+# Install in a private temporary directory, not the source checkout:
+D=$(mktemp -d); cp runner/package{,-lock}.json "$D/"
+npm ci --prefix "$D" --omit=dev --no-audit --no-fund
+SHARED_PIN_ENGINE_DIR="$D" "$D/node_modules/node/bin/node" --test tests/native_engine.mjs
+rm -rf "$D"
+```
+
+Native tests exercise the locked manager's actual extraction/replacement,
+configuration validation and transport, including an existing-branch update
+refusal with unchanged remote head, and synthetic-credential argv/artifact
+checks. Python tests cover roster, pin discovery, relevant ancestry, alert
+thresholds, matrix uncertainty and publication proof.

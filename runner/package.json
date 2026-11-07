@@ -1,0 +1,9 @@
+{
+  "name": "shared-ci-pin-runner",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "node": "24.16.0",
+    "renovate": "44.222.0"
+  }
+}

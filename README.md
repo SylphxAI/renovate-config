@@ -26,8 +26,8 @@ here reaches every repository that extends it on its next run.
 | Setting | Value |
 | --- | --- |
 | Based on | `config:recommended`, dependency dashboard, semantic commit messages, monorepo and recommended grouping |
-| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`); owned `SylphxAI/.github` shared-action pins use 1am to 2am, selecting one hourly runner pass per day |
-| Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS. Owned `SylphxAI/.github` shared-action pins have no age delay: their continuously moving `main` must not reset a waiting period. |
+| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`) |
+| Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS |
 | Automerge | minor, patch, digest and pin updates, `@types/*`, and weekly lock file maintenance (Monday before 6am) |
 | Branches | one branch per dependency; a newer version updates that same pull request, and Renovate closes a superseded branch |
 | Majors | one pull request per dependency, labelled `breaking`, not automerged |
@@ -42,7 +42,7 @@ Grouped into one pull request each, with a label:
 
 | Group | Matches |
 | --- | --- |
-| SylphxAI/.github shared actions | every `uses: SylphxAI/.github/...` pin (needs-pass, ci-ok, main-red-gate, ...), one pull request per repository, automerged on green |
+| SylphxAI/.github shared actions | owned by the active-roster weekly desk pass, including checkout refs; disabled in other Renovate installations |
 | TypeScript type definitions | `@types/*` |
 | React packages | `react`, `react-*`, `@react/*`, `@types/react*` |
 | Effect packages | `effect`, `@effect/*` |
@@ -72,9 +72,10 @@ Settings in your own config win over the preset:
 
 ## Running Renovate yourself
 
-The SylphxAI organization runs Renovate from a GitHub Actions workflow in this
-repository instead of the hosted app. How it works, which repositories it
-covers and how it authenticates are in [runner/README.md](runner/README.md).
+Shared CI pins use the GitOps-supervised desk pass in this repository, with
+weekly grouping, marked-fix expedites and a non-blocking lag alert. Its single
+portfolio-derived roster, connected-user identity and immutable publication
+contract are in [runner/README.md](runner/README.md).
 
 ## Contributing
 

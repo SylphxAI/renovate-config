@@ -175,13 +175,23 @@ def run_engine(gh, row, key, target, root, state, binary, *, dry_run):
 
 
 def collect_files(gh, repo, head, blob_cache):
-    tree = gh.request(f'repos/{repo}/git/trees/{head}?recursive=1')
+    # Unrelated asset trees can truncate a whole-repository recursive response.
+    # Resolve only .github from this immutable head, then recurse by tree SHA.
+    root = gh.request(f'repos/{repo}/git/trees/{head}')
+    if root.get('truncated'):
+        raise Refused('consumer-tree-truncated')
+    github = next((entry for entry in root['tree'] if entry['path'] == '.github'), None)
+    if github is None:
+        return {}
+    if github['type'] != 'tree':
+        raise Refused('consumer-github-not-tree')
+    tree = gh.request(f'repos/{repo}/git/trees/{github["sha"]}?recursive=1')
     if tree.get('truncated'):
         raise Refused('consumer-tree-truncated')
     files = {}
     for entry in tree['tree']:
-        path = entry['path']
-        if entry['type'] != 'blob' or not path.startswith('.github/') or not path.endswith(('.yml', '.yaml')):
+        path = '.github/' + entry['path']
+        if entry['type'] != 'blob' or not path.endswith(('.yml', '.yaml')):
             continue
         if entry['sha'] not in blob_cache:
             if entry.get('size', 0) > 2_000_000:

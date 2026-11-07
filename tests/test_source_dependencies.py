@@ -123,8 +123,10 @@ class HistoricalConsumption(unittest.TestCase):
                       'repos/' + repo: {'archived': False, 'default_branch': 'main'},
                       'repos/' + repo + '/commits/main': {'sha': consumer_head},
                       'repos/' + repo + '/git/matching-refs/heads/renovate/shared-ci-': [],
-                      'repos/' + repo + '/git/trees/' + consumer_head + '?recursive=1': {
-                          'tree': [{'type': 'blob', 'path': path, 'sha': '1' * 40}
+                      'repos/' + repo + '/git/trees/' + consumer_head: {
+                          'tree': [{'type': 'tree', 'path': '.github', 'sha': '2' * 40}]},
+                      'repos/' + repo + '/git/trees/' + '2' * 40 + '?recursive=1': {
+                          'tree': [{'type': 'blob', 'path': path.removeprefix('.github/'), 'sha': '1' * 40}
                                    for path in files]}}
             return values[path] if path in values else source_request(path)
         def text(name, path, ref):

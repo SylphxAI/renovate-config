@@ -28,6 +28,8 @@ jobs:
           fi
       - name: Validate Renovate JSON
         run: python3 scripts/validate_renovate.py
+      - name: Verify shared-action update policy
+        run: python3 -B -m unittest discover -s tests -v
 
   # The required check (docs/ci-template.md and docs/optimistic-merge.md in
   # SylphxAI/.github): one aggregate whose name is `ci-ok`, so a required

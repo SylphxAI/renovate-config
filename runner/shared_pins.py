@@ -231,7 +231,8 @@ def changes_since_pin(gh, pins, head, fix_rows):
         commits = comparison.get('commits', [])
         if comparison.get('total_commits', len(commits)) > len(commits):
             unknown.append({'sha': old, 'reason': 'source-history-incomplete'})
-            continue
+            # Returned commits still prove positive relevant changes. Missing
+            # later commits cannot erase that evidence or imply a healthy pin.
         pending = list(selected)
         for commit in commits:
             if not pending:

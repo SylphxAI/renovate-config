@@ -76,6 +76,22 @@ class DeclaredConsumption(unittest.TestCase):
         self.assertEqual(unknown[0]['reason'], 'source-history-incomplete')
 
 
+    def test_capped_history_preserves_returned_positive_consumed_evidence(self):
+        class GH:
+            cache = {}
+            def compare(self, *_):
+                return {'files': [{'filename': f'scripts/unrelated{i}.py'} for i in range(300)],
+                        'commits': [{'sha': 'c', 'commit': {'committer': {'date': '2026-11-01T00:00:00Z'}}}],
+                        'total_commits': 251}
+            def forward(self, *_): return True
+            def request(self, _): return {'files': [{'filename': '.github/actions/a/action.yml'}]}
+        pin = {'sha': 'a' * 40, 'roots': ['.github/actions/a']}
+        changes, unknown = changes_since_pin(GH(), [pin], 'b' * 40, [])
+        self.assertEqual(len(changes), 1)
+        self.assertEqual(changes[0]['files'], ['.github/actions/a/action.yml'])
+        self.assertEqual(changes[0]['behind_pins'], ['a' * 40])
+        self.assertEqual({u['reason'] for u in unknown}, {'comparison-files-incomplete', 'source-history-incomplete'})
+
     def test_nonancestor_warning_is_in_native_pr_body_with_automerge_disabled(self):
         config = engine_config('SylphxAI/fixture', [], 'week-2026-46', Path('/tmp/fixture'),
                                ancestry_failures=['a' * 40])

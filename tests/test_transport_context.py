@@ -75,12 +75,18 @@ class ContextBoundary(unittest.TestCase):
     def test_reviewer_other_repository_repro_and_context_overrides_are_refused(self):
         cases = [(['-C', str(self.other), 'push', 'origin', BRANCH], {}),
                  (['--git-dir', str(self.other / '.git'), 'push', 'origin', BRANCH], {}),
+                 (['-C' + str(self.other), 'push', 'origin', BRANCH], {}),
+                 (['--work-tree=' + str(self.other), 'status'], {}),
+                 (['--exec-path=/tmp', 'status'], {}),
+                 (['--config-env=core.worktree=REDIRECT', 'status'], {}),
                  (['push', '-c', 'core.quotePath=false', 'origin', BRANCH], {}),
                  (['-c', 'core.quotePath=true', 'status'], {}),
                  (['-c', 'core.sshCommand=evil', 'status'], {}),
                  (['push', 'origin', BRANCH], {'GIT_DIR': str(self.other / '.git')}),
                  (['push', 'origin', BRANCH], {'GIT_WORK_TREE': str(self.other)}),
                  (['push', 'origin', BRANCH], {'GIT_COMMON_DIR': str(self.other / '.git')}),
+                 (['status'], {'GIT_INDEX_FILE': str(self.other / '.git/index')}),
+                 (['status'], {'GIT_CONFIG': '/tmp/unapproved'}),
                  (['push', 'origin', BRANCH], {'GIT_CONFIG_PARAMETERS': "'core.hooksPath'='/dev/null'"})]
         for args, env in cases:
             with self.subTest(args=args, overrides=list(env)):

@@ -25,15 +25,15 @@ here reaches every repository that extends it on its next run.
 
 | Setting | Value |
 | --- | --- |
-| Based on | `config:recommended`, dependency dashboard, semantic commit messages, monorepo and recommended grouping |
-| Schedule | 10pm to 6am, Hong Kong time (`Asia/Hong_Kong`) |
+| Based on | `config:recommended`, dependency dashboard, semantic commit messages, monorepo, recommended, and all non-major grouping (`group:allNonMajor`) |
+| Schedule | 3am to 5am, Hong Kong time (`Asia/Hong_Kong`) |
 | Minimum release age | 3 days; 7 days for majors and Android core libraries; 5 days for iOS |
 | Automerge | minor, patch, digest and pin updates, `@types/*`, and weekly lock file maintenance (Monday before 6am) |
 | Branches | one branch per dependency; a newer version updates that same pull request, and Renovate closes a superseded branch |
 | Majors | one pull request per dependency, labelled `breaking`, not automerged |
 | Limits | 2 new pull requests per hour, 3 open at once, per repository |
 | Automerge method | the platform's own auto-merge, using squash, so a squash-only merge queue and required checks still apply |
-| Security fixes | on in Renovate (`vulnerabilityAlerts`), labelled `security` |
+| Security fixes | on in Renovate (`vulnerabilityAlerts`), immediate schedule (`at any time`), labelled `security` |
 | GitHub Actions | pinned to commit digests |
 | Docker images | pinned to digests, labelled `docker-update` |
 | Ignored paths | `node_modules`, `vendor`, `dist`, `build`, `.cache`, `ios/Pods`, `android/.gradle` |

@@ -476,6 +476,68 @@ class TestGitHubConnectedUserGuards(unittest.TestCase):
             with self.assertRaises(github_io.Refused):
                 gh.request("/user")
 
+    def test_read_requests_use_desk_app_broker_when_executable_and_fallback_to_user(self):
+        token, calls, base_run = self._mock_run()
+        app_token = "app-read-token-not-for-argv"
+        broker_calls = []
+
+        def run(argv, **kwargs):
+            if argv[0] == "/fake/desk-gh-token":
+                broker_calls.append((list(argv), kwargs))
+                return _RunResult(stdout=app_token + "\n")
+            return base_run(argv, **kwargs)
+
+        with mock.patch.dict(os.environ, DESK_GH_TOKEN_BIN="/fake/desk-gh-token"), \
+             mock.patch.object(github_io.os.path, "isfile", return_value=True), \
+             mock.patch.object(github_io.os, "access", return_value=True), \
+             mock.patch.object(github_io.subprocess, "run", side_effect=run):
+            gh = github_io.GitHub()
+            self.assertNotIn("DESK_GH_PRIORITY", gh.env)
+            gh.request("repos/OzyrixLtd/site-a")
+            gh.request("repos/OzyrixLtd/site-b")
+            gh.request("repos/OzyrixLtd/site-a/pulls", method="POST", body={"title": "x"})
+
+        self.assertEqual(len(broker_calls), 1)
+        self.assertEqual(broker_calls[0][0], ["/fake/desk-gh-token", "token", "OzyrixLtd", "--read"])
+        get_calls = [c for c in calls if c[0][:3] == ["gh", "api", "--method"] and "repos/OzyrixLtd/" in c[0] and "GET" in c[0]]
+        post_calls = [c for c in calls if c[0][:3] == ["gh", "api", "--method"] and "POST" in c[0]]
+        self.assertTrue(all(c[1]["env"]["GH_TOKEN"] == app_token for c in get_calls))
+        self.assertTrue(all(c[1]["env"]["GH_TOKEN"] == token for c in post_calls))
+
+    def test_verify_user_false_defers_user_call_and_queue_state_uses_app_read_broker(self):
+        token, calls, base_run = self._mock_run()
+        app_token = "app-read-token-not-for-argv"
+
+        def run(argv, **kwargs):
+            if argv[0] == "/fake/desk-gh-token":
+                return _RunResult(stdout=app_token + "\n")
+            if "graphql" in argv:
+                calls.append((list(argv), dict(kwargs)))
+                return _RunResult(stdout=json.dumps({
+                    "data": {"repository": {"pullRequest": {
+                        "headRefOid": PR_HEAD, "state": "OPEN",
+                        "isInMergeQueue": True, "autoMergeRequest": None,
+                    }}}
+                }))
+            return base_run(argv, **kwargs)
+
+        with mock.patch.dict(os.environ, DESK_GH_TOKEN_BIN="/fake/desk-gh-token"), \
+             mock.patch.object(github_io.os.path, "isfile", return_value=True), \
+             mock.patch.object(github_io.os, "access", return_value=True), \
+             mock.patch.object(github_io.subprocess, "run", side_effect=run):
+            gh = github_io.GitHub(verify_user=False)
+            self.assertEqual([c for c in calls if "user" in c[0]], [])
+            state = gh.queue_state("SylphxAI/example", 17)
+            self.assertEqual(state["headRefOid"], PR_HEAD)
+            gh.verify_connected_user()
+            gh.verify_connected_user()
+
+        graphql_calls = [c for c in calls if "graphql" in c[0]]
+        user_calls = [c for c in calls if "user" in c[0]]
+        self.assertEqual(graphql_calls[0][1]["env"]["GH_TOKEN"], app_token)
+        self.assertEqual(len(user_calls), 1)
+        self.assertEqual(user_calls[0][1]["env"]["GH_TOKEN"], token)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -390,7 +390,7 @@ def main(argv=None):
     with (args.state_dir / 'runner.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         now = datetime.fromisoformat(args.now.replace('Z', '+00:00')) if args.now else utcnow()
-        gh = None if args.inventory else GitHub()
+        gh = None if args.inventory else GitHub(verify_user=False)
         report = {'read_at': now.isoformat(), 'apply': args.apply, 'regular_due': regular_due(now),
                   'repositories': [], 'alerts': [], 'cache_peak_bytes': 0}
         with tempfile.TemporaryDirectory(prefix='pass-', dir=args.cache_root) as temporary:
@@ -403,7 +403,7 @@ def main(argv=None):
                 target, fix_rows = args.source_head, []
             else:
                 owner = gh.request('repos/SylphxAI/owner/commits/main')['sha']
-                portfolio = gh.text('SylphxAI/owner', 'company/portfolio.md', owner)
+                portfolio = gh.text('SylphxAI/owner', 'company/group-state-registers.md', owner)
                 target = gh.request(f'repos/{SOURCE}/commits/main')['sha']
                 fix_rows = fixes(gh)
                 rows = []
@@ -484,6 +484,7 @@ def main(argv=None):
                     # admitted new immutable branch, not existing pin PRs.
                     key = decision.get('branch_key')
                     if key and decision.get('should_open', True) and (args.apply or args.engine_dry_run):
+                        gh.verify_connected_user()
                         if gh.remaining() <= FLOOR + ENGINE_RESERVE:
                             raise Refused('native-engine-budget-reserve')
                         prior = gh.pages(f'repos/{repo}/pulls?state=all&head={repo.split("/")[0]}:renovate/shared-ci-{key}')

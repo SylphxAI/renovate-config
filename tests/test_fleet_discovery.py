@@ -42,7 +42,8 @@ class CompareEvidence(unittest.TestCase):
                 return True
             def request(self, path):
                 return {'files': [{'filename': ROOT + '/action.yml'}]}
-        changes, unknown = runner.changes_since_pin(GH(), pins, TARGET, [])
+        with patch.object(runner, 'utcnow', return_value=NOW):
+            changes, unknown = runner.changes_since_pin(GH(), pins, TARGET, [])
         decision = plan_repo('SylphxAI/example', FILES, TARGET, [], changes, NOW, [], True, pins=pins)
         return decision, unknown
 

@@ -79,6 +79,67 @@ Prose `SylphxAI/not-listed`
     assert parse_active_portfolio(text) == ["Cubeage/frozen", "Cubeage/rank", "EpiowAI/epiow", "EpiowAI/minutes", "SylphxAI/.github", "SylphxAI/cloud", "SylphxAI/infra", "SylphxAI/new"]
 
 
+def _test_sto_register_parses_active_tables_and_skips_inactive_modes_and_links():
+    text = """# Group State Registers
+
+## Register 1: ENR
+| # | Entity |
+|---|---|
+| 1 | `SylphxAI/ignore-register-1` |
+
+## Register 2: `STO` — Product, Engine, Repository, Store ID & Domain Ownership Register
+
+### 2.1 Drive — Foundations (`ENT-EX-ONE`)
+| `#` | Product / Engine | Canonical Repository | Owner | Scope |
+|---:|---|---|---|---|
+| **1** | **Sylphx** | `SylphxAI/cloud` (foundation support: `SylphxAI/infra`, `SylphxAI/.github`, `SylphxAI/renovate-config`, `SylphxAI/owner`) | `core` | Platform |
+| **3** | **Engine** | `SylphxAI/keel` (release source: `SylphxAI/engine-src`) | `core` | Engine (Legacy `#74` is retired.) |
+
+### 2.2 Drive, Maintain & Retired — Group (`ENT-EX-TWO`)
+| `#` | Title | Mode | Live V1 Repository & `public.game.id` | Remake Repository | Notes |
+|---:|---|---|---|---|---|
+| **16** | **Platform** | **Drive** | `Cubeage/active` (`Cubeage/old-web`) | — | Web |
+| **19 / 31** | **Title One** | **Drive (Flagship #1)** | `Cubeage/game-one` (`game.id = 1`) | `Cubeage/game-one-next` (`#31`) | Flagship |
+| **21 / 33** | **Title Two** | **Maintain** | `Cubeage/game-two` (`game.id = 2`), `Cubeage/rank` | `Cubeage/game-two-next` (`#33`, Deferred) | Live |
+| **65** | **Paused Title** | **Paused** | — | `Cubeage/paused-next` (private) | Paused |
+| **15, 34** | **Parked** | **Parked / Deferred** | — | `Cubeage/parked-next` (`#15`) | Parked |
+| **18** | **Retired** | **Retired** | `Cubeage/retired` (`#18`) | — | Archived |
+
+### 2.3 Drive, Maintain & Retired — First-Party & Partner
+| `#` | Product | Mode | Entity | Canonical Repository & Public Surface |
+|---:|---|---|---|---|
+| **41** | **App A** | **Drive** | `ENT-EX-THREE` | `EpiowAI/epiow` (`example.com`), `EpiowAI/minutes`. |
+| **42** | **Site A** | **Drive** | `ENT-EX-FOUR` | `OzyrixLtd/site-a` (`https://example.org/`). |
+| **43** | **Delivered** | **Maintain** | `ENT-EX-ONE` | `SylphxAI/bgca` (`sylphx_delivery=delivered`). |
+| **44** | **Personal** | **Drive** | Personal | `ExampleUser/site`. |
+| **51, 69–72, 74** | **Internal** | **Maintain / Retired** | `ENT-EX-ONE` | `SylphxAI/tool-a` (`#70`), Local tools (`#69`, [`docs/tools.md`](../docs/tools.md)). Retired: `SylphxAI/tool-old` (`#51`). |
+
+## Register 3: `ASR` — Approved Recurring Spend Register
+| `asr_id` | Asset |
+|---|---|
+| **`ASR-CI-003`** | `SylphxAI/ignore-register-3` |
+"""
+    assert parse_active_portfolio(text) == [
+        "Cubeage/active",
+        "Cubeage/game-one",
+        "Cubeage/game-one-next",
+        "Cubeage/game-two",
+        "Cubeage/rank",
+        "EpiowAI/epiow",
+        "EpiowAI/minutes",
+        "ExampleUser/site",
+        "OzyrixLtd/site-a",
+        "SylphxAI/.github",
+        "SylphxAI/cloud",
+        "SylphxAI/engine-src",
+        "SylphxAI/infra",
+        "SylphxAI/keel",
+        "SylphxAI/owner",
+        "SylphxAI/renovate-config",
+        "SylphxAI/tool-a",
+    ]
+
+
 @cases("quote,comment", [("", ""), ("", " # main"), ('"', " # main"), ("'", "")])
 def _test_uses_offsets_and_exact_source_match(quote, comment):
     text = "# 雪 🧭\njobs:\n  test:\n    steps:\n" + f"      - uses: {quote}SylphxAI/.github/.github/actions/review@{OLD}{quote}{comment}\n"

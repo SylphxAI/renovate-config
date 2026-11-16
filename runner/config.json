@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
   "description": [
-    "Shared CI pin pass. Scope is derived at runtime from owner company/portfolio.md; no static repository or App-installation list."
+    "Shared CI pin pass. Scope is derived at runtime from owner company/group-state-registers.md (STO); no static repository or App-installation list."
   ],
   "platform": "github",
   "gitUrl": "ssh",

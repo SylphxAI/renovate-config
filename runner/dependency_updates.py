@@ -47,6 +47,9 @@ def discover_scope(gh, *, extra_orgs=DEFAULT_EXTRA_ORGS, only_repos=()):
             if meta.get('archived') or meta.get('disabled'):
                 skipped.append({'repo': repo, 'skip': 'archived'})
                 continue
+            if meta.get('size') == 0 and gh.request(f'repos/{repo}/branches?per_page=1') == []:
+                skipped.append({'repo': repo, 'skip': 'empty'})
+                continue
             owner = repo.split('/', 1)[0]
             if owner == 'SylphxAI':
                 props = gh.request(f'repos/{repo}/properties/values')

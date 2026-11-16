@@ -73,6 +73,19 @@ class DependencyUpdatesTests(unittest.TestCase):
         self.assertEqual(active, [])
         self.assertEqual(skipped, [{'repo': 'SylphxAI/delivered-repo', 'skip': 'delivered'}])
 
+    def test_empty_repository_is_skipped_cleanly(self):
+        class GH:
+            def request(self, path):
+                if path == 'repos/SylphxAI/empty-repo':
+                    return {'archived': False, 'disabled': False, 'size': 0}
+                if path == 'repos/SylphxAI/empty-repo/branches?per_page=1':
+                    return []
+                raise AssertionError(path)
+
+        _, active, skipped = du.discover_scope(GH(), only_repos=['SylphxAI/empty-repo'])
+        self.assertEqual(active, [])
+        self.assertEqual(skipped, [{'repo': 'SylphxAI/empty-repo', 'skip': 'empty'}])
+
     def test_run_repo_passes_connected_identity_and_accepts_disabled_repo(self):
         class GH:
             _token = 'secret-user-token'

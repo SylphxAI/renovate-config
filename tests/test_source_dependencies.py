@@ -312,6 +312,17 @@ class DeclaredConsumption(unittest.TestCase):
         with self.assertRaisesRegex(DependencyUnknown, 'local-reference-missing'):
             dependency_paths(['.github/actions/a'], files, files.__getitem__)
 
+    def test_top_level_action_helper_file_enrolls_without_directory_error(self):
+        files = {
+            '.github/actions/a/action.yml': 'run: python .github/actions/helper.py',
+            '.github/actions/helper.py': 'pass',
+            '.github/actions/other/action.yml': 'run: echo unused',
+        }
+        self.assertEqual(
+            set(dependency_paths(['.github/actions/a'], files, files.__getitem__)),
+            set(files),
+        )
+
     def test_ordinary_cap_but_explicit_fix_bypasses_it(self):
         regular = {'should_open': True, 'qualifying_fixes': []}
         self.assertTrue(admit_regular(dict(regular), 14)['should_open'])
@@ -402,6 +413,36 @@ class DeclaredConsumption(unittest.TestCase):
             report = json.loads((root / 'state/report.json').read_text())
             self.assertTrue(report['repositories'][0]['should_open'])
             self.assertFalse(report['apply'])
+
+    def test_empty_repository_is_skipped_without_commits_call(self):
+        repo, owner_sha, target = 'SylphxAI/empty-release-source', 'a' * 40, 'b' * 40
+        register = ('## Register 2: `STO`\n### 2.1 Drive (`ENT-EX-ONE`)\n'
+                    '| `#` | Product | Canonical Repository |\n|---:|---|---|\n'
+                    f'| **3** | **Engine** | `{repo}` |\n')
+        class FakeGH:
+            cache = {}
+            def request(self, path):
+                if path == 'repos/SylphxAI/owner/commits/main': return {'sha': owner_sha}
+                if path == 'repos/SylphxAI/.github/commits/main': return {'sha': target}
+                if path == f'repos/{repo}': return {'archived': False, 'default_branch': 'main', 'size': 0}
+                if path == f'repos/{repo}/branches?per_page=1': return []
+                if path == f'repos/SylphxAI/.github/git/trees/{target}?recursive=1': return {'tree': [], 'truncated': False}
+                raise AssertionError(path)
+            def text(self, r, p, ref):
+                assert (r, p, ref) == ('SylphxAI/owner', 'company/group-state-registers.md', owner_sha)
+                return register
+            def pages(self, path):
+                if path == f'repos/{repo}/pulls?state=open': return []
+                if path == 'repos/SylphxAI/.github/issues?state=closed&labels=shared-action-fix': return []
+                raise AssertionError(path)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            with patch('shared_pins.GitHub', return_value=FakeGH()):
+                self.assertEqual(main(['--state-dir', str(root / 'state'), '--cache-root', str(root / 'cache')]), 0)
+            report = json.loads((root / 'state/report.json').read_text())
+            self.assertTrue(report['open_roll_inventory_known'])
+            self.assertEqual(report['repositories'], [{'repo': repo, 'skip': 'empty'}])
+            self.assertEqual(report['alerts'], [])
 
 
 if __name__ == '__main__': unittest.main()

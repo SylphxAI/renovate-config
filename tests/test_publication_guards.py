@@ -366,6 +366,9 @@ class TestGitTransportPureGuards(unittest.TestCase):
         call.assert_called_once()
 
     def test_main_rejects_unapproved_leading_command_config(self):
+        with mock.patch.object(git_transport, "call", return_value=_RunResult()) as call:
+            self.assertEqual(git_transport.main(["-c", "core.quotePath=false", "-c", "core.abbrev=40", "commit", "-m", "ok"]), 0)
+        call.assert_called_once_with(["commit", "-m", "ok"], directory=Path.cwd().resolve(), env=mock.ANY, capture=False)
         with self.assertRaises(ValueError):
             git_transport.main(["-c", "core.sshCommand=evil", "status"])
         with self.assertRaises(ValueError):

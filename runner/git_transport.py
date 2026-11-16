@@ -186,9 +186,9 @@ ALLOWED_COMMANDS = frozenset({
 
 def prepare_invocation(args: list[str]):
     """Validate common Git invocation boundaries and bind one clean environment."""
-    # The native library hard-codes this one presentation setting. Consume it
-    # literally, never forward any caller-supplied global option to real Git.
-    if args[:2] == ['-c', 'core.quotePath=false']:
+    # Renovate and simple-git hard-code these literal presentation settings.
+    # Consume them here instead of forwarding caller global options to Git.
+    while args[:2] in (['-c', 'core.quotePath=false'], ['-c', 'core.abbrev=40']):
         args = args[2:]
     if not args:
         raise ValueError('missing Git subcommand')

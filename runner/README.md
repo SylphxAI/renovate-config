@@ -1,19 +1,28 @@
-# Shared CI pin pass
+# Desk Renovate and shared CI pin passes
 
-Renovate propagates shared `SylphxAI/.github` action and workflow pins from a
-GitOps-supervised desk process, not from an Actions App writer. The previous
-`dependency-updates.yml` writer and its static repository/App scope are removed.
-The shared package is disabled in the public preset so a second Renovate
-installation cannot create competing shared-pin branches. Other dependency
-preset settings are unchanged; this process updates shared CI pins only.
+Renovate propagates shared `SylphxAI/.github` action and workflow pins
+(`runner/shared_pins.py`) and runs general dependency updates and Dependency
+Dashboards (`runner/dependency_updates.py`, using
+`runner/dependency_config.json`) from GitOps-supervised desk processes at
+`$0` Actions runner spend. The shared `SylphxAI/.github` package remains
+disabled in `default.json` so general dependency runs never create competing
+shared-pin branches.
 
 ## Scope, cadence and cost
 
-Each pass reads the current `SylphxAI/owner` main `company/portfolio.md`.
-Only Repository cells in its Drive/Maintain tables are eligible; paused, parked,
-retired, archived and delivered entries are excluded. Foundation support repos
-belong in that same file, not in a code exception list. An archived GitHub repo
-is skipped even if the portfolio has not caught up.
+Each pass reads the current `SylphxAI/owner` main
+`company/group-state-registers.md` (`Register 2: STO`). Only active
+`Drive`/`Maintain` rows and active `Canonical` / `Live V1` / `Keel Remake`
+repository cells are eligible; `Paused`, `Parked`, `Deferred`,
+`Retired`, `Archived` and `sylphx_delivery=delivered` entries are excluded.
+Foundation support and release source repos belong in that same register.
+`runner/dependency_updates.py` also scans non-archived, non-fork `OzyrixLtd`
+source repositories.
+Read-only REST discovery uses the desk App broker (`desk-gh-token --read`) when
+available so discovery does not exhaust the connected user's quota, while all
+branch pushes, pull requests and auto-merge actions stay on the connected
+`shtse8` credential. An archived GitHub repo is skipped even if the register
+has not caught up.
 
 - Regular: one stable assigned weekday Monday–Friday, beginning **04:17 UTC**,
   one grouped immutable PR per consumer per ISO week. The first eight bytes of
@@ -117,8 +126,11 @@ after every pass. No LLM polling schedule is involved.
 python3 runner/shared_pins.py --state-dir /tmp/shared-pin-report --cache-root /tmp/shared-pin-cache
 # Native Renovate dry run on admitted candidates; push adapter refuses writes.
 python3 runner/shared_pins.py --state-dir /tmp/shared-pin-native-report --cache-root /tmp/shared-pin-native-cache --engine-dry-run
-# Production, only through the GitOps supervisor:
+# General dependency dry run for active STO + OzyrixLtd repos:
+python3 runner/dependency_updates.py --dry-run full --state-dir /tmp/dep-report --cache-root /tmp/dep-cache
+# Production, only through the GitOps supervisors:
 python3 runner/shared_pins.py --state-dir /scratch/coordinator/state/shared-pins --cache-root /tmp/renovate-shared-pins --apply
+python3 runner/dependency_updates.py --apply --state-dir /scratch/coordinator/state/renovate --cache-root /tmp/renovate-deps
 ```
 
 `report.json` records source head, roster, candidates, findings, job estimates
@@ -139,11 +151,15 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 D=$(mktemp -d); cp runner/package{,-lock}.json "$D/"
 npm ci --prefix "$D" --omit=dev --no-audit --no-fund
 SHARED_PIN_ENGINE_DIR="$D" "$D/node_modules/node/bin/node" --test tests/native_engine.mjs
+"$D/node_modules/.bin/renovate-config-validator" runner/dependency_config.json
+"$D/node_modules/.bin/renovate-config-validator" default.json
 rm -rf "$D"
 ```
 
 Native tests exercise the locked manager's actual extraction/replacement,
 configuration validation and transport, including an existing-branch update
 refusal with unchanged remote head, and synthetic-credential argv/artifact
-checks. Python tests cover roster, pin discovery, relevant ancestry, alert
-thresholds, matrix uncertainty and publication proof.
+checks. Python tests cover roster, `group-state-registers.md` (`STO`) and
+`OzyrixLtd` scope discovery, general dependency transport/shim guards, pin
+discovery, relevant ancestry, alert thresholds, matrix uncertainty and
+publication proof.

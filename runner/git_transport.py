@@ -35,23 +35,35 @@ def push_args(args: list[str], branch: str) -> list[str]:
     return cleaned
 
 
-def clone_args(args: list[str]) -> list[str]:
-    # Accept only the native clone grammar; Git accepts abbreviated options and
-    # attached -c values, so a denylist of configuration spellings is unsafe.
+def parse_clone_invocation(args: list[str]) -> tuple[list[str], list[str], bool]:
+    """Validate clone grammar and split flags from (url, target) positionals."""
     if not args or args[0] != 'clone':
         raise ValueError('invalid clone command')
-    positional = []
+    flags, positional = [], []
     i = 1
+    saw_end_opts = False
     while i < len(args):
         value = args[i]
+        if saw_end_opts:
+            if value.startswith('-'):
+                raise ValueError('clone configuration override refused')
+            positional.append(value)
+            i += 1
+            continue
+        if value == '--':
+            saw_end_opts = True
+            i += 1
+            continue
         if value in ('-b', '--branch'):
             if i + 1 >= len(args) or args[i + 1].startswith('-'):
                 raise ValueError('missing clone branch')
+            flags.extend([value, args[i + 1]])
             i += 2
             continue
         if (value in ('--no-checkout', '--single-branch', '--no-tags', '--quiet')
                 or re.fullmatch(r'--depth=\d+', value)
                 or value.startswith('--filter=')):
+            flags.append(value)
             i += 1
             continue
         if value.startswith('-'):
@@ -62,11 +74,19 @@ def clone_args(args: list[str]) -> list[str]:
         raise ValueError('invalid clone target')
     if any(a.startswith(('https://', 'http://')) and '@' in a for a in args):
         raise ValueError('credential-bearing URL refused')
+    return flags, positional, saw_end_opts
+
+
+def clone_args(args: list[str]) -> list[str]:
+    # Accept only the native clone grammar; Git accepts abbreviated options and
+    # attached -c values, so a denylist of configuration spellings is unsafe.
+    flags, positional, saw_end_opts = parse_clone_invocation(args)
     # The engine supplies [clone, -b, base, URL, .]; never materialize asset blobs.
     # Repeated --filter combines filters, which GitHub rejects. Replace the
     # native blob filter instead of appending another one.
-    selected = [a for a in args[1:] if not a.startswith(('--filter=', '--depth=')) and a != '--no-checkout']
-    return [args[0], '--depth=1', '--filter=blob:none', '--no-checkout', *selected]
+    selected = [a for a in flags if not a.startswith(('--filter=', '--depth=')) and a != '--no-checkout']
+    tail = ['--', *positional] if saw_end_opts else positional
+    return ['clone', '--depth=1', '--filter=blob:none', '--no-checkout', *selected, *tail]
 
 
 def git_environment():
@@ -104,6 +124,25 @@ def git_environment():
     return {**{k: v for k, v in os.environ.items() if not k.startswith('GIT_')}, **fixed, **auth}
 
 
+def hook_env(env: dict[str, str]) -> dict[str, str]:
+    """Drop temporary git shim directory from PATH when running desk-publish hooks."""
+    invoked = Path(sys.argv[0]) if sys.argv else Path()
+    if invoked.name != 'git':
+        return env
+    shim_dir = invoked.parent.resolve()
+    parts = []
+    for entry in env.get('PATH', '').split(os.pathsep):
+        if not entry:
+            continue
+        try:
+            if Path(entry).resolve() == shim_dir:
+                continue
+        except OSError:
+            pass
+        parts.append(entry)
+    return {**env, 'PATH': os.pathsep.join(parts)}
+
+
 def github_url(value):
     """Keep native SSH argv credential-free, but use HTTPS for real Git."""
     for prefix in ('git@github.com:', 'ssh://git@github.com/'):
@@ -135,11 +174,18 @@ def call(args: list[str], *, directory: Path, env: dict, capture: bool = False) 
     return result
 
 
-def main(args: list[str]) -> int:
-    if os.environ.get('SHARED_PINS_TEST_TRACE'):
-        import json
-        with open(os.environ['SHARED_PINS_TEST_TRACE'], 'a') as output:
-            output.write(json.dumps(['adapter', *args]) + '\n')
+ALLOWED_COMMANDS = frozenset({
+    'version', '--version', 'rev-parse', 'status', 'config', 'remote', 'init',
+    'fetch', 'checkout', 'reset', 'clean', 'branch', 'log', 'show', 'show-ref',
+    'ls-files', 'ls-tree', 'ls-remote', 'diff', 'diff-tree', 'cat-file',
+    'merge-base', 'merge', 'add', 'commit', 'symbolic-ref', 'check-ignore',
+    'for-each-ref', 'check-attr', 'rev-list', 'check-ref-format', 'submodule',
+    'tag', 'clone', 'push', 'sparse-checkout',
+})
+
+
+def prepare_invocation(args: list[str]):
+    """Validate common Git invocation boundaries and bind one clean environment."""
     # The native library hard-codes this one presentation setting. Consume it
     # literally, never forward any caller-supplied global option to real Git.
     if args[:2] == ['-c', 'core.quotePath=false']:
@@ -147,25 +193,17 @@ def main(args: list[str]) -> int:
     if not args:
         raise ValueError('missing Git subcommand')
     command = args[0]
-    index = 0
     if any(re.match(r'^-(?:c|C)(?:.|$)|^--(?:git-dir|work-tree|exec-path|config-env|namespace|super-prefix)(?:=|$)', a)
            for a in args):
         raise ValueError('Git context/configuration override refused')
     env = git_environment()
     directory = Path.cwd().resolve()
-    def run(values, *, capture=False):
-        return call(values, directory=directory, env=env, capture=capture)
-    allowed = {'version', '--version', 'rev-parse', 'status', 'config', 'remote', 'init',
-               'fetch', 'checkout', 'reset', 'clean', 'branch', 'log', 'show', 'show-ref',
-               'ls-files', 'ls-tree', 'ls-remote', 'diff', 'diff-tree', 'cat-file',
-               'merge-base', 'merge', 'add', 'commit', 'symbolic-ref', 'check-ignore',
-               'for-each-ref', 'check-attr', 'rev-list', 'check-ref-format', 'submodule', 'tag', 'clone', 'push', 'sparse-checkout'}
-    if command not in allowed:
+    if command not in ALLOWED_COMMANDS:
         raise ValueError('unapproved Git command')
     if any(re.search(r'https?://[^/\s]+@', a) for a in args):
         raise ValueError('credential-bearing Git argv refused')
     if command == 'config':
-        options = args[index + 1:]
+        options = args[1:]
         if any(re.search(r'(?i)hooksPath|^include(?:If)?\.', a) for a in options):
             raise ValueError('hook configuration override refused')
         reads = {'--get', '--get-all', '--get-regexp', '--get-urlmatch', '--list', '-l'}
@@ -176,7 +214,7 @@ def main(args: list[str]) -> int:
             if len(values) > 2 or any(a.startswith('-') for a in values):
                 raise ValueError('unapproved Git configuration operation')
     if command == 'remote':
-        options = args[index + 1:]
+        options = args[1:]
         # Renovate may inspect a remote or set its credential-free fetch URL;
         # it must never install an alternate pushurl or additional target.
         if options and options[0] == 'set-url':
@@ -184,6 +222,17 @@ def main(args: list[str]) -> int:
                 raise ValueError('remote mutation refused')
         elif options and options[0] not in ('get-url', '-v', '--verbose'):
             raise ValueError('remote mutation refused')
+    return command, args, directory, env
+
+
+def main(args: list[str]) -> int:
+    if os.environ.get('SHARED_PINS_TEST_TRACE'):
+        import json
+        with open(os.environ['SHARED_PINS_TEST_TRACE'], 'a') as output:
+            output.write(json.dumps(['adapter', *args]) + '\n')
+    command, args, directory, env = prepare_invocation(args)
+    def run(values, *, capture=False):
+        return call(values, directory=directory, env=env, capture=capture)
     if command == 'clone':
         index = args.index('clone')
         result = run(clone_args(args))
@@ -198,7 +247,8 @@ def main(args: list[str]) -> int:
         if result.returncode:
             return result.returncode
         if os.environ.get('SHARED_PINS_INSTALL_HOOK') == '1':
-            return subprocess.run(['desk-publish', 'install-hook', str(Path(target).resolve())], check=False).returncode
+            return subprocess.run(['desk-publish', 'install-hook', str(Path(target).resolve())],
+                                  env=hook_env(env), check=False).returncode
         return 0
     if command == 'push':
         index = args.index('push')
@@ -252,7 +302,7 @@ def main(args: list[str]) -> int:
             effective = run(['remote', 'get-url', '--push', '--all', 'origin'], capture=True)
             if effective.returncode or effective.stdout.strip() not in expected:
                 raise ValueError('effective consumer push target changed')
-        return run(['push', *cleaned]).returncode
+        return call(['push', *cleaned], directory=directory, env=hook_env(env)).returncode
     if '--no-verify' in args:
         raise ValueError('verification bypass refused')
     # Fetch/rebase of an existing roll is not part of this writer's contract.

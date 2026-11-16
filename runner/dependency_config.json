@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
+  "description": "Self-hosted general Renovate defaults for active STO and OzyrixLtd repositories. Scope is resolved dynamically at runtime from SylphxAI/owner company/group-state-registers.md (STO) and active OzyrixLtd sources; SylphxAI/.github pins remain disabled in default.json so desk-shared-pins stays sole owner.",
+  "platform": "github",
+  "gitUrl": "ssh",
+  "gitNoVerify": [],
+  "gitTimeout": 120000,
+  "onboarding": false,
+  "requireConfig": "optional",
+  "extends": [
+    "github>SylphxAI/renovate-config"
+  ],
+  "binarySource": "global",
+  "github-actions": {
+    "enabled": true
+  },
+  "ignorePrAuthor": true,
+  "gitAuthor": "Kyle Tse <hi@kylet.se>",
+  "gitIgnoredAuthors": [
+    "261101846+sylphx-builder[bot]@users.noreply.github.com",
+    "29139614+renovate[bot]@users.noreply.github.com",
+    "212550965+sylphx-ai[bot]@users.noreply.github.com"
+  ]
+}

@@ -28,50 +28,96 @@ FULL_SHA = re.compile(r"[0-9a-fA-F]{40}\Z")
 REPOSITORY = re.compile(r"`([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)`")
 
 
-def parse_active_portfolio(text: str) -> list[str]:
-    """Read only Repository cells of Drive/Maintain Markdown tables.
+def _keep_parenthetical(match: re.Match[str]) -> str:
+    inner = match.group(1).strip()
+    if re.match(r"^(?:foundation\s+support|release\s+source)\s*:", inner, re.I):
+        return match.group(0)
+    return ""
 
-    Foundation-support repositories and multiple current repositories in a cell
-    count. Prose, Owns-cell references, historical sections and former names in
-    parentheses do not. Explicit paused/parked/retired/archived/delivered rows
-    are excluded, but frozen serving Maintain products are not.
+
+def _extract_active_repositories(cell: str) -> list[str]:
+    """Return active owner/repo names from one STO or legacy repository cell."""
+    cleaned = re.sub(r"\bRetired\s*:.*$", "", cell, flags=re.I)
+    cleaned = re.sub(r"\[[^\]]*\]\([^)]*\)", "", cleaned)
+    # Exclude per-repository deferred/paused/retired annotations and legacy former names.
+    cleaned = re.sub(
+        r"`[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+`\s*\([^()]*(?:paused|parked|deferred|retired|archived|delivered)[^()]*\)",
+        "",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\(([^()]*)\)", _keep_parenthetical, cleaned)
+    return REPOSITORY.findall(cleaned)
+
+
+def parse_active_portfolio(text: str) -> list[str]:
+    """Read Repository cells of active STO (group-state-registers.md) or legacy Drive/Maintain tables.
+
+    Foundation-support and release-source repositories and multiple active
+    repositories in a cell count. Prose, Owns/Scope references, Paused/Parked/
+    Deferred/Retired sections or rows, delivered projects, per-repo deferred
+    annotations and former names do not.
     """
+    in_sto = False
     active = False
     columns: list[str] = []
+    repo_columns: list[str] = []
     repositories: set[str] = set()
     for line in text.splitlines():
-        heading = re.match(r"^##\s+(.+?)\s*#*\s*$", line)
-        if heading:
-            title = heading.group(1)
-            active = bool(re.match(r"(?:Drive|Maintain)\b", title))
+        h2 = re.match(r"^##\s+(.+?)\s*#*\s*$", line)
+        if h2:
+            title = re.sub(r"[*`]", "", h2.group(1)).strip()
+            in_sto = bool(re.match(r"Register\s+2\s*:\s*STO\b", title, re.I))
+            active = bool(re.match(r"(?:Drive|Maintain)\b", title, re.I))
             columns = []
+            repo_columns = []
+            continue
+        h3 = re.match(r"^###\s+(.+?)\s*#*\s*$", line)
+        if h3:
+            if in_sto:
+                sub = re.sub(r"[*`]", "", h3.group(1)).strip()
+                active = bool(re.search(r"\b(?:Drive|Maintain)\b", sub, re.I))
+                columns = []
+                repo_columns = []
             continue
         if not active or not line.lstrip().startswith("|"):
             continue
         cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip())[1:-1]]
-        if "Repository" in cells:
-            columns = cells
+        plain_cells = [re.sub(r"[*`]", "", cell).strip() for cell in cells]
+        if any("Repository" in cell for cell in plain_cells):
+            columns = plain_cells
+            repo_columns = [cell for cell in plain_cells if "Repository" in cell]
             continue
-        if not columns or len(cells) != len(columns):
+        if not columns or not repo_columns or len(cells) != len(columns):
             continue
         row = dict(zip(columns, cells))
-        if not re.fullmatch(r"\d+", row.get("#", "")):
+        row_num = re.sub(r"[*`]", "", row.get("#", "")).strip()
+        if not row_num or not re.search(r"\d", row_num) or not re.fullmatch(r"[\d\s,/–-]+", row_num):
             continue
-        status = " ".join(row.get(key, "") for key in ("Product", "State", "Repository"))
-        if re.search(r"\b(paused|parked|retired|archived|delivered)\b", status, re.I):
+        plain_row = re.sub(r"[*`]", "", " ".join(row.values()))
+        if re.search(r"sylphx_delivery\s*=\s*delivered", plain_row, re.I):
             continue
-        owns = row.get("Owns", "")
-        plain_owns = re.sub(r"[*`]", "", owns).strip()
-        if (re.match(r"(?:paused|parked|retired|archived|delivered)\b", plain_owns, re.I)
-                or re.search(r"\b(?:paused|parked)\s*[:(]", plain_owns, re.I)
-                or re.search(r"sylphx_delivery\s*=\s*delivered", plain_owns, re.I)):
-            continue
-        cell = row["Repository"]
-        # Former names are parenthetical in portfolio.md; strip only those
-        # annotations, not the current repositories outside the parentheses.
-        while re.search(r"\([^()]*\)", cell):
-            cell = re.sub(r"\([^()]*\)", "", cell)
-        repositories.update(REPOSITORY.findall(cell))
+        if "Mode" in row:
+            mode = re.sub(r"[*`]", "", row["Mode"]).strip()
+            if not re.match(r"^(?:Drive|Maintain)\b", mode, re.I):
+                continue
+        else:
+            status = " ".join(row.get(key, "") for key in ("Product", "State", "Repository"))
+            if re.search(r"\b(paused|parked|retired|archived|delivered)\b", status, re.I):
+                continue
+            owns = row.get("Owns", "")
+            plain_owns = re.sub(r"[*`]", "", owns).strip()
+            if (re.match(r"(?:paused|parked|retired|archived|delivered)\b", plain_owns, re.I)
+                    or re.search(r"\b(?:paused|parked)\s*[:(]", plain_owns, re.I)):
+                continue
+        if in_sto:
+            for col in repo_columns:
+                repositories.update(_extract_active_repositories(row[col]))
+        else:
+            cell = row["Repository"]
+            while re.search(r"\([^()]*\)", cell):
+                cell = re.sub(r"\([^()]*\)", "", cell)
+            repositories.update(REPOSITORY.findall(cell))
     return sorted(repositories, key=str.casefold)
 
 

@@ -6,10 +6,11 @@
     ":dependencyDashboard",
     ":semanticCommits",
     "group:monorepos",
-    "group:recommended"
+    "group:recommended",
+    "group:allNonMajor"
   ],
   "timezone": "Asia/Hong_Kong",
-  "schedule": ["after 10pm", "before 6am"],
+  "schedule": ["after 3am and before 5am"],
   "dependencyDashboardTitle": "Dependency Dashboard",
   "labels": ["dependencies"],
   "rebaseWhen": "conflicted",
@@ -26,6 +27,7 @@
   "vulnerabilityAlerts": {
     "description": "Security fixes still open PRs during the dependency hold, labelled security. Dependabot security updates may open the same fix; close the duplicate.",
     "enabled": true,
+    "schedule": ["at any time"],
     "labels": ["dependencies", "security"]
   },
   "lockFileMaintenance": {

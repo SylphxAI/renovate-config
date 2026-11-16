@@ -69,7 +69,10 @@ def dependency_paths(roots, source_paths, read):
                 raise DependencyUnknown('local-path-missing:' + reference)
             return False
         action = _ACTION.match(reference)
-        directory = (action.group(1) if action else
+        action_dir = (action.group(1)
+                      if action and (action.group(1) in members or not (reference in paths and reference.endswith(_CODE)))
+                      else None)
+        directory = (action_dir if action_dir else
                      posixpath.dirname(reference) if reference in paths else reference)
         if directory not in members:
             raise DependencyUnknown('local-directory-unresolved:' + reference)
@@ -86,7 +89,7 @@ def dependency_paths(roots, source_paths, read):
         # declared roots/local uses and actual action manifests execute YAML.
         if executable and reference in paths and reference.endswith(('.yml', '.yaml')):
             queue(reference)
-        if action:
+        if action_dir:
             for path in (directory + '/action.yml', directory + '/action.yaml'):
                 if path in paths:
                     queue(path)

@@ -437,6 +437,9 @@ def main(argv=None):
                         raise Refused('open-roll-inventory-unreadable')
                     open_rolls += sum(1 for pr in prs if pr.get('headRefName', pr.get('head', {}).get('ref', '')).startswith('renovate/shared-ci-'))
                     inventory_read = True
+                    if not args.inventory and meta.get('size') == 0 and gh.request(f'repos/{repo}/branches?per_page=1') == []:
+                        report['repositories'].append({'repo': repo, 'skip': 'empty'})
+                        continue
                     if args.inventory:
                         if 'error' in row or not isinstance(row.get('files'), dict):
                             raise Refused('repository-inventory-unreadable')

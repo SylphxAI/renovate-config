@@ -111,8 +111,12 @@ class DependencyUpdatesTests(unittest.TestCase):
             cli = root / 'renovate.js'
             with patch.object(du.subprocess, 'run', side_effect=fake_run):
                 entry = du.run_repo(GH(), 'EpiowAI/epiow', root, (node, cli), du.DEFAULT_CONFIG, dry_run='off', force=True)
+            Res.stdout = json.dumps({'msg': 'Repository finished', 'repository': 'EpiowAI/epiow', 'result': 'disabled-by-config', 'cloned': False}).encode()
+            with patch.object(du.subprocess, 'run', side_effect=fake_run):
+                disabled_cfg = du.run_repo(GH(), 'EpiowAI/epiow', root, (node, cli), du.DEFAULT_CONFIG, dry_run='off', force=True)
 
         self.assertEqual(entry['engine_result'], 'disabled')
+        self.assertEqual(disabled_cfg['engine_result'], 'disabled-by-config')
         self.assertEqual(seen['env']['RENOVATE_USERNAME'], 'shtse8')
         self.assertEqual(seen['env']['RENOVATE_GIT_AUTHOR'], 'Kyle Tse <hi@kylet.se>')
         self.assertEqual(seen['env']['RENOVATE_SCHEDULE'], '[]')

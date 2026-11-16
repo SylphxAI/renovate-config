@@ -157,7 +157,7 @@ def run_repo(gh, repo, root, binary, config_path, *, dry_run='full', force=False
             if item.get('msg') == 'Repository finished' and item.get('repository') == repo:
                 terminal.append(item)
         status = terminal[0].get('result') if len(terminal) == 1 else 'missing'
-        if result.returncode or status not in ('done', 'disabled'):
+        if result.returncode or status not in ('done', 'disabled', 'disabled-by-config'):
             code = status if isinstance(status, str) and re.fullmatch(r'[a-z-]{1,64}', status) else 'unknown'
             raise Refused(f'native-engine-failed:{result.returncode}:{code}')
         return {

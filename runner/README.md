@@ -10,8 +10,8 @@ shared-pin branches.
 
 ## Scope, cadence and cost
 
-Each pass reads the current `SylphxAI/owner` main
-`company/group-state-registers.md` (`Register 2: STO`). Only active
+Each fleet pass reads `Register 2: STO` from the current Knowledge document
+`org:governance/group-state-registers`. Only active
 `Drive`/`Maintain` rows and active `Canonical` / `Live V1` / `Keel Remake`
 repository cells are eligible; `Paused`, `Parked`, `Deferred`,
 `Retired`, `Archived` and `sylphx_delivery=delivered` entries are excluded.
@@ -70,10 +70,17 @@ The service inherits the desk's existing connected `gh` delegation. The runner
 uses the installed unwrapped CLI for the local `gh auth token` read only,
 then uses the metered wrapper for every API/merge call. It captures the token only in process memory; each pass verifies `/user` is
 User **shtse8** with **repo + workflow** OAuth scopes, failing closed with no App
-fallback. There is no new repository, Actions environment or on-disk token.
-This uses owner `company/github-apps.md`'s connected-user mode (installation
-mode is infrastructure/review only) and `company/credentials.md` preference #4:
-read authorized existing custody in-process instead of duplicating a secret.
+fallback. These Git credentials are separate from the Knowledge reader.
+
+Both services need `ANYAGENTS_API_URL` (the HTTPS coordinator origin) and a
+coordinator-audience bearer scoped to `knowledge:read`. Prefer an absolute
+`ANYAGENTS_TOKEN_FILE` managed and refreshed by the runtime, readable only by
+the service identity. If no file is configured, the runner accepts direct
+`ANYAGENTS_TOKEN` injection. Neither is passed to the update engine. Each pass
+reads once; denied, truncated or malformed reads stop fleet processing before
+repository discovery. There is no cached roster or alternate data source.
+Explicit `dependency_updates.py --repo` and offline inventory mode do not
+require Knowledge access.
 
 Renovate and Node are integrity-locked by `package-lock.json`. The native custom
 regex manager extracts, resolves, edits and commits the full SHA uses scalars
@@ -133,8 +140,10 @@ python3 runner/shared_pins.py --state-dir /scratch/coordinator/state/shared-pins
 python3 runner/dependency_updates.py --apply --state-dir /scratch/coordinator/state/renovate --cache-root /tmp/renovate-deps
 ```
 
-`report.json` records source head, roster, candidates, findings, job estimates
-and peak/final allocated cache bytes. `lag.trigger` contains actionable findings;
+Fleet `report.json` records `sto_version` so operators can verify which
+Knowledge revision each service used. The shared-pin report also records
+source head, roster, candidates, findings and job estimates. Both reports track
+peak and final cache allocation. `lag.trigger` contains actionable findings;
 the service treats its contents as an opaque deduplication digest and sends only
 a static message/report path. A complete zero-alert pass clears it. Interrupted
 passes do not clear an existing alert. Persistent push/arm claim files protect
@@ -159,7 +168,7 @@ rm -rf "$D"
 Native tests exercise the locked manager's actual extraction/replacement,
 configuration validation and transport, including an existing-branch update
 refusal with unchanged remote head, and synthetic-credential argv/artifact
-checks. Python tests cover roster, `group-state-registers.md` (`STO`) and
+checks. Python tests cover the Knowledge reader, `STO` parsing and
 `OzyrixLtd` scope discovery, general dependency transport/shim guards, pin
 discovery, relevant ancestry, alert thresholds, matrix uncertainty and
 publication proof.

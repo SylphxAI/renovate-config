@@ -50,8 +50,8 @@ def _extract_active_repositories(cell: str) -> list[str]:
     return REPOSITORY.findall(cleaned)
 
 
-def parse_active_portfolio(text: str) -> list[str]:
-    """Read Repository cells of active STO (group-state-registers.md) or legacy Drive/Maintain tables.
+def parse_active_portfolio(text: str, *, sto_only: bool = False) -> list[str]:
+    """Read active STO repository cells; permit legacy layouts only for offline fixtures.
 
     Foundation-support and release-source repositories and multiple active
     repositories in a cell count. Prose, Owns/Scope references, Paused/Parked/
@@ -59,7 +59,9 @@ def parse_active_portfolio(text: str) -> list[str]:
     annotations and former names do not.
     """
     in_sto = False
+    seen_sto = False
     active = False
+    table_started = False
     columns: list[str] = []
     repo_columns: list[str] = []
     repositories: set[str] = set()
@@ -68,7 +70,13 @@ def parse_active_portfolio(text: str) -> list[str]:
         if h2:
             title = re.sub(r"[*`]", "", h2.group(1)).strip()
             in_sto = bool(re.match(r"Register\s+2\s*:\s*STO\b", title, re.I))
-            active = bool(re.match(r"(?:Drive|Maintain)\b", title, re.I))
+            if sto_only and in_sto and seen_sto:
+                raise ValueError("duplicate STO section")
+            seen_sto |= in_sto
+            active = not sto_only and bool(re.match(r"(?:Drive|Maintain)\b", title, re.I))
+            if sto_only and columns and not table_started:
+                raise ValueError("missing STO table divider")
+            table_started = False
             columns = []
             repo_columns = []
             continue
@@ -77,22 +85,42 @@ def parse_active_portfolio(text: str) -> list[str]:
             if in_sto:
                 sub = re.sub(r"[*`]", "", h3.group(1)).strip()
                 active = bool(re.search(r"\b(?:Drive|Maintain)\b", sub, re.I))
+                if sto_only and columns and not table_started:
+                    raise ValueError("missing STO table divider")
+                table_started = False
                 columns = []
                 repo_columns = []
             continue
         if not active or not line.lstrip().startswith("|"):
             continue
-        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip())[1:-1]]
+        parts = re.split(r"(?<!\\)\|", line.strip())
+        if sto_only and parts[-1] != "":
+            raise ValueError("unclosed STO table row")
+        cells = [cell.strip() for cell in parts[1:-1]]
         plain_cells = [re.sub(r"[*`]", "", cell).strip() for cell in cells]
-        if any("Repository" in cell for cell in plain_cells):
+        is_header = any("Repository" in cell for cell in plain_cells)
+        if sto_only and is_header and "#" in plain_cells:
+            if (columns and not table_started) or len(plain_cells) != len(set(plain_cells)):
+                raise ValueError("invalid STO table header")
+            table_started = False
+        if is_header and (not sto_only or "#" in plain_cells):
             columns = plain_cells
             repo_columns = [cell for cell in plain_cells if "Repository" in cell]
             continue
         if not columns or not repo_columns or len(cells) != len(columns):
+            if sto_only:
+                raise ValueError("invalid STO table columns")
+            continue
+        if sto_only and not table_started:
+            if not all(re.fullmatch(r":?-+:?", cell) for cell in cells):
+                raise ValueError("invalid STO table divider")
+            table_started = True
             continue
         row = dict(zip(columns, cells))
         row_num = re.sub(r"[*`]", "", row.get("#", "")).strip()
         if not row_num or not re.search(r"\d", row_num) or not re.fullmatch(r"[\d\s,/–-]+", row_num):
+            if sto_only:
+                raise ValueError("invalid STO row number")
             continue
         plain_row = re.sub(r"[*`]", "", " ".join(row.values()))
         if re.search(r"sylphx_delivery\s*=\s*delivered", plain_row, re.I):
@@ -118,6 +146,8 @@ def parse_active_portfolio(text: str) -> list[str]:
             while re.search(r"\([^()]*\)", cell):
                 cell = re.sub(r"\([^()]*\)", "", cell)
             repositories.update(REPOSITORY.findall(cell))
+    if sto_only and (not seen_sto or not repositories or (columns and not table_started)):
+        raise ValueError("missing or empty STO register")
     return sorted(repositories, key=str.casefold)
 
 

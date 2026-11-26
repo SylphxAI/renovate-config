@@ -12,18 +12,14 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runner'))
 import shared_pins as runner
 from github_io import Refused
-from pin_plan import parse_pins, plan_repo
+from knowledge_register import Register
+from pin_plan import parse_pins, plan_repo, regular_weekday
 
 OLD, TARGET, BAD = 'a' * 40, 'b' * 40, 'd' * 40
 ROOT = '.github/actions/a'
 FILES = {'.github/workflows/a.yml': f'steps:\n  - uses: SylphxAI/.github/{ROOT}@{OLD} # main\n'}
-NOW = datetime(2026, 11, 9, 5, tzinfo=timezone.utc)
-PORTFOLIO = '''## Drive — Repositories
-| # | Product | Repository | Owns |
-|---|---|---|---|
-| 1 | Bad | `SylphxAI/a-bad` | Active |
-| 2 | Good | `SylphxAI/example` | Active |
-'''
+BAD_REPO, GOOD_REPO = 'example/a-bad', 'example/good'
+NOW = datetime(2026, 11, 9 + regular_weekday(GOOD_REPO), 5, tzinfo=timezone.utc)
 
 
 class CompareEvidence(unittest.TestCase):
@@ -44,7 +40,7 @@ class CompareEvidence(unittest.TestCase):
                 return {'files': [{'filename': ROOT + '/action.yml'}]}
         with patch.object(runner, 'utcnow', return_value=NOW):
             changes, unknown = runner.changes_since_pin(GH(), pins, TARGET, [])
-        decision = plan_repo('SylphxAI/example', FILES, TARGET, [], changes, NOW, [], True, pins=pins)
+        decision = plan_repo(GOOD_REPO, FILES, TARGET, [], changes, NOW, [], True, pins=pins)
         return decision, unknown
 
     def test_capped_compare_retains_returned_consumed_path_even_without_commit_evidence(self):
@@ -72,8 +68,6 @@ class FleetCapacity(unittest.TestCase):
                 if '/git/matching-refs/' in path:
                     return []
                 return {'default_branch': 'main', 'archived': False}
-            def text(self, *args):
-                return PORTFOLIO
             def pages(self, path):
                 if '/a-bad/' in path:
                     if failure == 'inventory':
@@ -94,6 +88,7 @@ class FleetCapacity(unittest.TestCase):
                   'comparison_pin': OLD, 'merged_at': '2026-11-01T00:00:00Z'}
         with tempfile.TemporaryDirectory() as temp, ExitStack() as stack:
             for name, kwargs in {
+                'read_sto_register': {'return_value': Register(7, (BAD_REPO, GOOD_REPO))},
                 'GitHub': {'return_value': GH()}, 'collect_files': {'side_effect': collect},
                 'source_reader': {'side_effect': reader}, 'utcnow': {'return_value': NOW},
                 'fixes': {'return_value': [change] if marked else []},
@@ -108,7 +103,7 @@ class FleetCapacity(unittest.TestCase):
         report = self.run_fixture()
         self.assertEqual(report['open_roll_prs'], 15)
         self.assertTrue(report['open_roll_inventory_known'])
-        good = next(r for r in report['repositories'] if r['repo'] == 'SylphxAI/example')
+        good = next(r for r in report['repositories'] if r['repo'] == GOOD_REPO)
         self.assertFalse(good['should_open'])
         self.assertTrue(good['capacity_deferred'])
 
@@ -116,14 +111,14 @@ class FleetCapacity(unittest.TestCase):
         report = self.run_fixture(failure='consumer')
         self.assertEqual(report['open_roll_prs'], 15)
         self.assertTrue(report['open_roll_inventory_known'])
-        self.assertFalse(next(r for r in report['repositories'] if r['repo'] == 'SylphxAI/example')['should_open'])
+        self.assertFalse(next(r for r in report['repositories'] if r['repo'] == GOOD_REPO)['should_open'])
 
     def test_unreadable_inventory_refuses_all_new_regular_and_marked_rolls(self):
         for marked in (False, True):
             with self.subTest(marked=marked):
                 report = self.run_fixture(failure='inventory', marked=marked)
                 self.assertFalse(report['open_roll_inventory_known'])
-                good = next(r for r in report['repositories'] if r['repo'] == 'SylphxAI/example')
+                good = next(r for r in report['repositories'] if r['repo'] == GOOD_REPO)
                 self.assertFalse(good['should_open'])
                 self.assertEqual(good['admission'], 'open-roll-inventory-unknown')
                 self.assertIn('open-roll-inventory-unknown', [r.get('reason') for r in report['alerts']])
@@ -132,12 +127,12 @@ class FleetCapacity(unittest.TestCase):
         report = self.run_fixture(existing=14)
         self.assertEqual(report['open_roll_prs'], 14)
         self.assertTrue(report['open_roll_inventory_known'])
-        self.assertTrue(next(r for r in report['repositories'] if r['repo'] == 'SylphxAI/example')['should_open'])
+        self.assertTrue(next(r for r in report['repositories'] if r['repo'] == GOOD_REPO)['should_open'])
 
     def test_known_inventory_full_cap_still_admits_marked_fix(self):
         report = self.run_fixture(marked=True)
         self.assertEqual(report['open_roll_prs'], 15)
-        self.assertTrue(next(r for r in report['repositories'] if r['repo'] == 'SylphxAI/example')['should_open'])
+        self.assertTrue(next(r for r in report['repositories'] if r['repo'] == GOOD_REPO)['should_open'])
 
 
 if __name__ == '__main__':

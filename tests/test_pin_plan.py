@@ -92,7 +92,7 @@ def _test_sto_register_parses_active_tables_and_skips_inactive_modes_and_links()
 ### 2.1 Drive — Foundations (`ENT-EX-ONE`)
 | `#` | Product / Engine | Canonical Repository | Owner | Scope |
 |---:|---|---|---|---|
-| **1** | **Sylphx** | `SylphxAI/cloud` (foundation support: `SylphxAI/infra`, `SylphxAI/.github`, `SylphxAI/renovate-config`, `SylphxAI/owner`) | `core` | Platform |
+| **1** | **Platform** | `ExampleOrg/cloud` (foundation support: `ExampleOrg/infra`, `ExampleOrg/.github`, `ExampleOrg/renovate-config`) | `core` | Platform |
 | **3** | **Engine** | `SylphxAI/keel` (release source: `SylphxAI/engine-src`) | `core` | Engine (Legacy `#74` is retired.) |
 
 ### 2.2 Drive, Maintain & Retired — Group (`ENT-EX-TWO`)
@@ -127,15 +127,14 @@ def _test_sto_register_parses_active_tables_and_skips_inactive_modes_and_links()
         "Cubeage/rank",
         "EpiowAI/epiow",
         "EpiowAI/minutes",
+        "ExampleOrg/.github",
+        "ExampleOrg/cloud",
+        "ExampleOrg/infra",
+        "ExampleOrg/renovate-config",
         "ExampleUser/site",
         "OzyrixLtd/site-a",
-        "SylphxAI/.github",
-        "SylphxAI/cloud",
         "SylphxAI/engine-src",
-        "SylphxAI/infra",
         "SylphxAI/keel",
-        "SylphxAI/owner",
-        "SylphxAI/renovate-config",
         "SylphxAI/tool-a",
     ]
 

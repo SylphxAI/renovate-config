@@ -9,6 +9,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runner'))
 import dependency_updates as du
 from github_io import Refused
+from knowledge_register import Register
+from pin_plan import SOURCE, parse_active_portfolio
 
 STO_FIXTURE = """## Register 2: `STO`
 
@@ -25,12 +27,13 @@ STO_FIXTURE = """## Register 2: `STO`
 """
 
 
+EMPTY_REPO = 'ExampleOrg/empty-repo'
+
+
 class DependencyUpdatesTests(unittest.TestCase):
     def test_discover_scope_combines_sto_and_extra_org_and_filters_delivered_archived(self):
         class GH:
             def request(self, path):
-                if path == 'repos/SylphxAI/owner/commits/main':
-                    return {'sha': 'a' * 40}
                 if path == 'repos/SylphxAI/cloud':
                     return {'archived': False, 'disabled': False}
                 if path == 'repos/SylphxAI/infra':
@@ -43,10 +46,6 @@ class DependencyUpdatesTests(unittest.TestCase):
                     return [{'property_name': 'sylphx_delivery', 'value': 'active'}]
                 raise Refused('unexpected')
 
-            def text(self, repo, path, ref):
-                assert (repo, path, ref) == ('SylphxAI/owner', 'company/group-state-registers.md', 'a' * 40)
-                return STO_FIXTURE
-
             def pages(self, path):
                 assert path == 'orgs/OzyrixLtd/repos?type=sources'
                 return [
@@ -55,36 +54,37 @@ class DependencyUpdatesTests(unittest.TestCase):
                     {'full_name': 'OzyrixLtd/old-fork', 'archived': False, 'fork': True},
                 ]
 
-        sha, active, skipped = du.discover_scope(GH())
-        self.assertEqual(sha, 'a' * 40)
+        register = Register(7, tuple(parse_active_portfolio(STO_FIXTURE, sto_only=True)))
+        active, skipped = du.discover_scope(GH(), register=register)
         self.assertEqual(active, ['OzyrixLtd/site-a', 'OzyrixLtd/site-b', 'SylphxAI/cloud'])
         self.assertEqual(skipped, [{'repo': 'SylphxAI/infra', 'skip': 'archived'}])
 
     def test_sylphx_delivered_property_fails_closed(self):
+        delivered_repo = f'{SOURCE.split("/")[0]}/delivered-repo'
         class GH:
             def request(self, path):
-                if path == 'repos/SylphxAI/delivered-repo':
+                if path == f'repos/{delivered_repo}':
                     return {'archived': False, 'disabled': False}
-                if path == 'repos/SylphxAI/delivered-repo/properties/values':
+                if path == f'repos/{delivered_repo}/properties/values':
                     return [{'property_name': 'sylphx_delivery', 'value': 'delivered'}]
                 raise AssertionError(path)
 
-        _, active, skipped = du.discover_scope(GH(), only_repos=['SylphxAI/delivered-repo'])
+        active, skipped = du.discover_scope(GH(), only_repos=[delivered_repo])
         self.assertEqual(active, [])
-        self.assertEqual(skipped, [{'repo': 'SylphxAI/delivered-repo', 'skip': 'delivered'}])
+        self.assertEqual(skipped, [{'repo': delivered_repo, 'skip': 'delivered'}])
 
     def test_empty_repository_is_skipped_cleanly(self):
         class GH:
             def request(self, path):
-                if path == 'repos/SylphxAI/empty-repo':
+                if path == f'repos/{EMPTY_REPO}':
                     return {'archived': False, 'disabled': False, 'size': 0}
-                if path == 'repos/SylphxAI/empty-repo/branches?per_page=1':
+                if path == f'repos/{EMPTY_REPO}/branches?per_page=1':
                     return []
                 raise AssertionError(path)
 
-        _, active, skipped = du.discover_scope(GH(), only_repos=['SylphxAI/empty-repo'])
+        active, skipped = du.discover_scope(GH(), only_repos=[EMPTY_REPO])
         self.assertEqual(active, [])
-        self.assertEqual(skipped, [{'repo': 'SylphxAI/empty-repo', 'skip': 'empty'}])
+        self.assertEqual(skipped, [{'repo': EMPTY_REPO, 'skip': 'empty'}])
 
     def test_run_repo_passes_connected_identity_and_accepts_disabled_repo(self):
         class GH:

@@ -14,7 +14,7 @@ import sys
 import tempfile
 
 from github_io import GitHub, Refused, save
-from pin_plan import parse_active_portfolio
+from knowledge_register import Register, read_sto_register
 from shared_pins import ENGINE_RESERVE, FLOOR, allocated, install_engine, private_directory, utcnow
 
 HERE = Path(__file__).resolve().parent
@@ -23,15 +23,14 @@ DEFAULT_EXTRA_ORGS = ('OzyrixLtd',)
 GIT_AUTHOR = 'Kyle Tse <hi@kylet.se>'
 
 
-def discover_scope(gh, *, extra_orgs=DEFAULT_EXTRA_ORGS, only_repos=()):
+def discover_scope(gh, *, register: Register | None = None, extra_orgs=DEFAULT_EXTRA_ORGS, only_repos=()):
     """Resolve active STO and extra-org repositories without static repo lists."""
     if only_repos:
         candidates = sorted(set(only_repos), key=str.casefold)
-        owner_sha = None
     else:
-        owner_sha = gh.request('repos/SylphxAI/owner/commits/main')['sha']
-        registers = gh.text('SylphxAI/owner', 'company/group-state-registers.md', owner_sha)
-        repos = set(parse_active_portfolio(registers))
+        if register is None:
+            raise Refused('knowledge-sto-unavailable')
+        repos = set(register.repos)
         for org in extra_orgs:
             for item in gh.pages(f'orgs/{org}/repos?type=sources'):
                 full = item.get('full_name')
@@ -63,7 +62,7 @@ def discover_scope(gh, *, extra_orgs=DEFAULT_EXTRA_ORGS, only_repos=()):
         except (Refused, OSError, ValueError, subprocess.SubprocessError) as error:
             cause = str(error) if isinstance(error, Refused) else type(error).__name__
             skipped.append({'repo': repo, 'error': cause})
-    return owner_sha, active, skipped
+    return active, skipped
 
 
 def run_repo(gh, repo, root, binary, config_path, *, dry_run='full', force=False):
@@ -171,7 +170,7 @@ def run_repo(gh, repo, root, binary, config_path, *, dry_run='full', force=False
         shutil.rmtree(folder, ignore_errors=True)
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true', help='run live Renovate writes without dry-run')
     parser.add_argument('--dry-run', choices=('off', 'lookup', 'full'), default=None)
@@ -181,7 +180,7 @@ def main():
     parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG)
     parser.add_argument('--state-dir', type=Path, required=True)
     parser.add_argument('--cache-root', type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.apply and args.dry_run and args.dry_run != 'off':
         parser.error('--apply conflicts with --dry-run')
@@ -189,15 +188,16 @@ def main():
 
     private_directory(args.state_dir)
     private_directory(args.cache_root)
+    register = read_sto_register(required=not args.repo)
     gh = GitHub(verify_user=False)
     extra_orgs = tuple(args.org) if args.org else DEFAULT_EXTRA_ORGS
-    owner_sha, active, skipped = discover_scope(gh, extra_orgs=extra_orgs, only_repos=args.repo)
+    active, skipped = discover_scope(gh, register=register, extra_orgs=extra_orgs, only_repos=args.repo)
     report = {
         'read_at': utcnow().isoformat(),
         'apply': args.apply,
         'dry_run': dry_run,
         'force': args.force,
-        'owner_head': owner_sha,
+        'sto_version': register.version if register else None,
         'active_count': len(active),
         'results': list(skipped),
         'alerts': [],

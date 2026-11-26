@@ -16,6 +16,7 @@ import sys
 import tempfile
 
 from github_io import GitHub, Refused, save
+from knowledge_register import read_sto_register
 from pin_plan import parse_active_portfolio, parse_pins, plan_repo
 from pin_proof import prove_files
 from source_dependencies import dependency_paths, touches
@@ -390,6 +391,7 @@ def main(argv=None):
     with (args.state_dir / 'runner.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         now = datetime.fromisoformat(args.now.replace('Z', '+00:00')) if args.now else utcnow()
+        register = read_sto_register(required=not args.inventory)
         gh = None if args.inventory else GitHub(verify_user=False)
         report = {'read_at': now.isoformat(), 'apply': args.apply, 'regular_due': regular_due(now),
                   'repositories': [], 'alerts': [], 'cache_peak_bytes': 0}
@@ -398,16 +400,15 @@ def main(argv=None):
             if args.inventory:
                 if not args.portfolio or not args.source_head:
                     parser.error('offline inventory requires --portfolio and --source-head')
-                portfolio = args.portfolio.read_text()
+                roster = parse_active_portfolio(args.portfolio.read_text())
                 rows = json.loads(args.inventory.read_text())
                 target, fix_rows = args.source_head, []
             else:
-                owner = gh.request('repos/SylphxAI/owner/commits/main')['sha']
-                portfolio = gh.text('SylphxAI/owner', 'company/group-state-registers.md', owner)
+                roster = list(register.repos)
+                report['sto_version'] = register.version
                 target = gh.request(f'repos/{SOURCE}/commits/main')['sha']
                 fix_rows = fixes(gh)
                 rows = []
-            roster = parse_active_portfolio(portfolio)
             report.update(source_head=target, active_roster=roster)
             enrich = None if gh is None else source_reader(gh, target)
             blob_cache, binary = {}, None

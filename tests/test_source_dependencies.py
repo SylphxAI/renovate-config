@@ -7,9 +7,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'runner'))
 from source_dependencies import DependencyUnknown, dependency_paths, touches
-from shared_pins import admit_regular, changes_since_pin, regular_due, engine_config, main, source_reader
+from shared_pins import SOURCE, admit_regular, changes_since_pin, regular_due, engine_config, main, source_reader
 from pin_plan import regular_weekday, parse_pins, plan_repo
 from github_io import Refused
+from knowledge_register import Register
 import hashlib
 from datetime import datetime, timezone
 
@@ -115,11 +116,9 @@ class HistoricalConsumption(unittest.TestCase):
         source_request, source_text = gh.request, gh.text
         repo = 'SylphxAI/fixture'
         consumer_head = 'e' * 40
-        portfolio = ('## Drive — Projects\n| # | Product | Repository | Owns |\n'
-                     '|---|---|---|---|\n| 1 | Fixture | `' + repo + '` | Active |\n')
+
         def request(path):
-            values = {'repos/SylphxAI/owner/commits/main': {'sha': 'f' * 40},
-                      'repos/SylphxAI/.github/commits/main': {'sha': self.target},
+            values = {f'repos/{SOURCE}/commits/main': {'sha': self.target},
                       'repos/' + repo: {'archived': False, 'default_branch': 'main'},
                       'repos/' + repo + '/commits/main': {'sha': consumer_head},
                       'repos/' + repo + '/git/matching-refs/heads/renovate/shared-ci-': [],
@@ -130,14 +129,13 @@ class HistoricalConsumption(unittest.TestCase):
                                    for path in files]}}
             return values[path] if path in values else source_request(path)
         def text(name, path, ref):
-            if name == 'SylphxAI/owner':
-                return portfolio
             return files[path] if name == repo else source_text(name, path, ref)
         gh.request, gh.text, gh.pages = request, text, lambda _: []
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            with patch('shared_pins.GitHub', return_value=gh), patch('shared_pins.run_engine') as engine, \
-                    patch('shared_pins.verify_and_arm') as arm:
+            with (patch('shared_pins.read_sto_register', return_value=Register(7, (repo,))),
+                  patch('shared_pins.GitHub', return_value=gh), patch('shared_pins.run_engine') as engine,
+                  patch('shared_pins.verify_and_arm') as arm):
                 self.assertEqual(main(['--state-dir', str(root / 'state'), '--cache-root', str(root / 'cache'),
                                        '--apply']), 0)
                 engine.assert_not_called()
@@ -415,29 +413,23 @@ class DeclaredConsumption(unittest.TestCase):
             self.assertFalse(report['apply'])
 
     def test_empty_repository_is_skipped_without_commits_call(self):
-        repo, owner_sha, target = 'SylphxAI/empty-release-source', 'a' * 40, 'b' * 40
-        register = ('## Register 2: `STO`\n### 2.1 Drive (`ENT-EX-ONE`)\n'
-                    '| `#` | Product | Canonical Repository |\n|---:|---|---|\n'
-                    f'| **3** | **Engine** | `{repo}` |\n')
+        repo, target = 'example/empty-release-source', 'b' * 40
         class FakeGH:
             cache = {}
             def request(self, path):
-                if path == 'repos/SylphxAI/owner/commits/main': return {'sha': owner_sha}
                 if path == 'repos/SylphxAI/.github/commits/main': return {'sha': target}
                 if path == f'repos/{repo}': return {'archived': False, 'default_branch': 'main', 'size': 0}
                 if path == f'repos/{repo}/branches?per_page=1': return []
                 if path == f'repos/SylphxAI/.github/git/trees/{target}?recursive=1': return {'tree': [], 'truncated': False}
                 raise AssertionError(path)
-            def text(self, r, p, ref):
-                assert (r, p, ref) == ('SylphxAI/owner', 'company/group-state-registers.md', owner_sha)
-                return register
             def pages(self, path):
                 if path == f'repos/{repo}/pulls?state=open': return []
                 if path == 'repos/SylphxAI/.github/issues?state=closed&labels=shared-action-fix': return []
                 raise AssertionError(path)
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            with patch('shared_pins.GitHub', return_value=FakeGH()):
+            with (patch('shared_pins.read_sto_register', return_value=Register(7, (repo,))),
+                  patch('shared_pins.GitHub', return_value=FakeGH())):
                 self.assertEqual(main(['--state-dir', str(root / 'state'), '--cache-root', str(root / 'cache')]), 0)
             report = json.loads((root / 'state/report.json').read_text())
             self.assertTrue(report['open_roll_inventory_known'])

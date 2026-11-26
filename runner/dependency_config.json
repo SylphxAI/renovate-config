@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
-  "description": "Self-hosted general Renovate defaults for active STO and OzyrixLtd repositories. Scope is resolved dynamically at runtime from SylphxAI/owner company/group-state-registers.md (STO) and active OzyrixLtd sources; SylphxAI/.github pins remain disabled in default.json so desk-shared-pins stays sole owner.",
+  "description": "Self-hosted general Renovate defaults. Scope is resolved at runtime from the canonical STO register and extra organizations; shared pins are handled by a separate pass.",
   "platform": "github",
   "gitUrl": "ssh",
   "gitNoVerify": [],
